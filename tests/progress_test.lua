@@ -87,6 +87,68 @@ eq(state.need_seed, true, 'zone asks for a fresh seed')
 progress.apply(state, 0x02D, string.rep('\0', 4), 7, 1)
 eq(state.limit, 4321, 'short packet is ignored')
 
+eq(progress.mode(50, 500, 1000, false, false), 'exp', 'mode leveling')
+eq(progress.mode(75, 100, 1000, true, false), 'limit', 'mode limit')
+eq(progress.mode(99, 0, 1, false, false), 'capacity', 'mode capacity')
+eq(progress.mode(99, 0, 1, true, false), 'limit', 'mode 99 merits')
+
+-- Points addon's estimate: average gain / average gap * 3600.
+-- Gaps are 1 (the stored first gap), 30, 30. Idle is 0. Count is 3.
+-- avg gap = (1+30+30+0) / 4 = 61/4. Per hour = 200 / (61/4) * 3600.
+local pace = progress.new_rate()
+progress.note(pace, 200, 100)
+progress.note(pace, 200, 130)
+progress.note(pace, 200, 160)
+eq(progress.per_hour(pace, 160), 200 / (61 / 4) * 3600, 'three gains')
+eq(progress.per_hour(pace, 160 + progress.RATE_IDLE + 1), 0, 'a long wait reads as zero')
+progress.note(pace, 100, 160 + progress.RATE_IDLE + 1)
+eq(#pace.samples, 1, 'a long wait starts over')
+eq(pace.samples[1].dt, 1, 'the fresh gain uses the first gap')
+eq(pace.samples[1].n, 100, 'the fresh gain keeps its amount')
+
+local back = progress.new_rate()
+progress.note(back, 100, 50)
+progress.note(back, 80, 40)
+eq(back.samples[2].dt, 0, 'a backwards clock is not a negative gap')
+progress.note(back, 0, 90)
+eq(#back.samples, 2, 'a zero gain is ignored')
+
+local kept = progress.new_rate()
+for i = 1, 51 do
+    progress.note(kept, i, 1000 + i * 10)
+end
+eq(#kept.samples, 50, 'keeps fifty gains')
+eq(kept.samples[1].n, 2, 'drops the oldest gain')
+
+eq(progress.rate_text('exp', 800), '800 EXP/hr', 'small exp')
+eq(progress.rate_text('exp', 47213.114), '47.2k EXP/hr', 'exp in thousands')
+eq(progress.rate_text('exp', -5), '0 EXP/hr', 'negative rate')
+eq(progress.rate_text('limit', 47213.114), '4.7 MP/hr', 'merits are limit points / 10000')
+eq(progress.rate_text('capacity', 18000), '18.0k CP/hr', 'capacity rate')
+
+local gains = progress.new_state()
+progress.apply(gains, 0x02D, msg(8, 500, 7), 7, 1, 1000)
+eq(#gains.exp_rate.samples, 1, 'xp message is a gain')
+eq(gains.exp_rate.samples[1].n, 500, 'xp amount')
+eq(gains.limit, 0, 'xp does not move limit')
+progress.apply(gains, 0x02D, msg(253, 400, 7), 7, 1, 1030)
+eq(gains.exp_rate.samples[2].n, 400, 'chain message amount is the exp')
+eq(gains.exp_rate.samples[2].dt, 30, 'gap is the time since the last gain')
+progress.apply(gains, 0x02D, msg(105, 50, 7), 7, 1, 1040)
+eq(gains.exp_rate.samples[3].n, 50, 'message 105 counts')
+progress.apply(gains, 0x02D, msg(8, 500, 9), 7, 1, 1050)
+eq(#gains.exp_rate.samples, 3, 'someone else is not your rate')
+progress.apply(gains, 0x02D, msg(371, 250, 7), 7, 1, 1060)
+eq(#gains.limit_rate.samples, 1, 'limit gain is its own rate')
+eq(gains.limit_rate.samples[1].n, 250, 'limit amount')
+eq(gains.limit, 250, 'limit total still wraps in')
+eq(#gains.exp_rate.samples, 3, 'a limit gain does not join the exp rate')
+progress.apply(gains, 0x02D, msg(8, 10, 7), 7, 1)
+eq(#gains.exp_rate.samples, 3, 'no clock means no rate sample')
+progress.apply(gains, 0x02D, msg(718, 1000, 7), 7, 1, 1070)
+eq(gains.capacity_rate.samples[1].n, 1000, 'capacity gain is its own rate')
+eq(#gains.exp_rate.samples, 3, 'a capacity gain does not join the exp rate')
+
 if failed > 0 then
     io.stderr:write(failed .. ' failed\n')
     os.exit(1)

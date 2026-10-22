@@ -5,16 +5,17 @@ A 6px bar from the lower left, the full width of the game window. A small
 tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
 (CP/hr when the bar is capacity points). The bar does not take mouse clicks.
 The tab does not either, except while /xpbar config is open, when it can be
-dragged. Colors are Sidekick3's HUD bar with the pointer off the panel: the
-near-black track at 70%, the Vanacore amber fill at 70%, and the 1px
-near-black edge.
+dragged. Colors of the bar are Sidekick3's HUD bar with the pointer off the
+panel: the near-black track at 70%, the Vanacore amber fill at 70%, and the
+1px near-black edge. The rate tab and the settings card follow that window
+style (look.lua): a dark rounded card, and an amber chip on the bar.
 
 Copyright (c) 2026 Seekey. MIT License, see LICENSE.
 ]]--
 
 addon.name     = 'XPBar'
 addon.author   = 'Seekey'
-addon.version  = '1.1.0'
+addon.version  = '1.2.0'
 addon.desc     = 'XP and merit progress along the bottom of the screen, with an EXP/hr or MP/hr tab.'
 addon.commands = { '/xpbar' }
 
@@ -23,6 +24,7 @@ local chat = require('chat')
 local imgui = require('imgui')
 local settings = require('settings')
 local progress = require('progress')
+local look = require('look')
 
 local BAR_H = 6
 -- Sidekick3 ui/window.lua BAR_OFF, the track while the pointer is off the HUD,
@@ -32,11 +34,6 @@ local TRACK_HEX, TRACK_A = '#0c0c0c', 0.70
 local FILL_HEX, FILL_A = '#E8B45C', 0.70
 -- The 1px edge Sidekick3 draws on every bar (BAR_OFF at BAR_EDGE_A).
 local EDGE_HEX, EDGE_A = '#0c0c0c', 0.70
--- The tab holds text, so its fill is solid. The ink is the same amber.
-local TAB_HEX, TAB_A = '#0c0c0c', 1
-local INK_HEX, INK_A = '#E8B45C', 1
-local SHADOW_HEX, SHADOW_A = '#000000', 0.90
-local TAB_PAD_X, TAB_PAD_Y = 6, 3
 local DEFAULT_TAB_X = 8
 -- Used only when ImGui has not reported a window size yet.
 local FALLBACK_W, FALLBACK_H = 3440, 1440
@@ -52,9 +49,6 @@ end
 local TRACK = col(TRACK_HEX, TRACK_A)
 local FILL = col(FILL_HEX, FILL_A)
 local EDGE = col(EDGE_HEX, EDGE_A)
-local TAB = col(TAB_HEX, TAB_A)
-local INK = col(INK_HEX, INK_A)
-local SHADOW = col(SHADOW_HEX, SHADOW_A)
 
 local defaults = T{
     tab_x = DEFAULT_TAB_X,
@@ -80,8 +74,13 @@ local DRAG_FLAGS = bit.bor(
     ImGuiWindowFlags_NoSavedSettings
 )
 
-local CONFIG_FLAGS = bit.bor(
-    ImGuiWindowFlags_AlwaysAutoResize,
+local CARD_FLAGS = bit.bor(
+    ImGuiWindowFlags_NoTitleBar,
+    ImGuiWindowFlags_NoResize,
+    ImGuiWindowFlags_NoScrollbar,
+    ImGuiWindowFlags_NoScrollWithMouse,
+    ImGuiWindowFlags_NoCollapse,
+    ImGuiWindowFlags_NoBackground,
     ImGuiWindowFlags_NoNavInputs
 )
 
@@ -161,19 +160,6 @@ local function xy(a, b)
     return tonumber(x) or 0, tonumber(y) or 0
 end
 
-local function measure(text)
-    local ok, a, b = pcall(imgui.CalcTextSize, text)
-    if not ok or a == nil then return nil end
-    local tw, th
-    if type(a) == 'number' then
-        tw, th = a, tonumber(b) or 0
-    else
-        tw, th = xy(a)
-    end
-    if tw <= 0 or th <= 0 then return nil end
-    return tw, th
-end
-
 -- Square on purpose: the bar is flush with the screen edge, so a rounded
 -- end would leave the lower left corner empty. The 1px stroke is inset by
 -- half a pixel so it stays inside the 6px instead of being clipped in half
@@ -192,9 +178,7 @@ end
 
 -- The chip on the bar's top edge. Its bottom meets the bar. x is the left
 -- the user chose; the chip slides left if it would pass the right edge.
-local function place_tab(w, h, tw, th)
-    local bw = math.floor(tw + TAB_PAD_X * 2 + 0.5)
-    local bh = math.floor(th + TAB_PAD_Y * 2 + 0.5)
+local function place_tab(w, h, bw, bh)
     if bw < 1 then bw = 1 end
     if bh < 1 then bh = 1 end
     local max_x = math.max(0, w - bw)
@@ -204,19 +188,14 @@ local function place_tab(w, h, tw, th)
     return math.floor(x + 0.5), math.floor(y + 0.5), bw, bh, max_x
 end
 
-local function draw_tab(w, h, text, tw, th)
-    if h < BAR_H + th or w < 1 then return nil end
-    local x, y, bw, bh, max_x = place_tab(w, h, tw, th)
+local function draw_tab(w, h, text)
+    local bw, bh = look.tab_size(text)
+    if bw == nil or h < BAR_H + bh or w < 1 then return nil end
+    -- A new `local bw, bh` here would hide the size just measured and pass nil.
+    local x, y, max_x
+    x, y, bw, bh, max_x = place_tab(w, h, bw, bh)
     if y < 0 then return nil end
-    local dl = imgui.GetBackgroundDrawList()
-    dl:AddRectFilled({ x, y }, { x + bw, y + bh }, TAB, 0)
-    dl:AddRect({ x + 0.5, y + 0.5 }, { x + bw - 0.5, y + bh - 0.5 }, EDGE, 0)
-    -- A hair of the bar color, so the chip still reads as part of the bar when the track is empty.
-    dl:AddLine({ x + 1, y + 1 }, { x + bw - 1, y + 1 }, FILL)
-    local tx = math.floor(x + (bw - tw) / 2 + 0.5)
-    local ty = math.floor(y + (bh - th) / 2 + 0.5)
-    dl:AddText({ tx + 1, ty + 1 }, SHADOW, text)
-    dl:AddText({ tx, ty }, INK, text)
+    look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text, config_open and look.over(x, y, bw, bh))
     return x, y, bw, bh, max_x
 end
 
@@ -264,33 +243,53 @@ local function drag_tab(x, y, bw, bh, max_x)
     if not imgui.IsMouseDown(0) then drag_origin = nil end
 end
 
-local function draw_config(max_x, shown_x)
-    imgui.SetNextWindowPos({ 80, 80 }, ImGuiCond_FirstUseEver)
-    config_state[1] = true
-    if imgui.Begin('XPBar settings', config_state, CONFIG_FLAGS) then
-        local show = { cfg.show_rate == true }
-        if imgui.Checkbox('Show rate', show) then
-            cfg.show_rate = show[1] == true
-            dirty = true
-        end
-        imgui.PushItemWidth(220)
-        local slider_max = max_x
-        if slider_max < 1 then slider_max = 1 end
-        local xv = { math.min(shown_x, slider_max) }
-        if imgui.SliderInt('Position', xv, 0, slider_max, '%d px') then
-            cfg.tab_x = clamp_num(xv[1], 0, max_x, cfg.tab_x)
-            dirty = true
-        end
-        imgui.PopItemWidth()
-        if imgui.Button('Reset position') then
+local function draw_inside(max_x, shown_x)
+    local wx, wy = xy(imgui.GetCursorScreenPos())
+    local dl = imgui.GetWindowDrawList()
+    local g = look.card(dl, wx, wy)
+    look.title(dl, g, config_state)
+    look.label(dl, g.left, g.show_cy, 'Show rate')
+    local on, changed = look.switch('##xpbar_show', g.switch_x, g.show_cy, cfg.show_rate == true)
+    if changed then
+        cfg.show_rate = on
+        dirty = true
+    end
+    look.label(dl, g.left, g.pos_cy, 'Position')
+    local slider_max = max_x
+    if slider_max < 0 then slider_max = 0 end
+    local shown = shown_x
+    if shown < 0 then shown = 0 elseif shown > slider_max then shown = slider_max end
+    local pos, moved = look.slider('##xpbar_x', g.slider_x, g.pos_cy, g.slider_w, shown, 0, slider_max)
+    if moved then
+        cfg.tab_x = clamp_num(pos, 0, max_x, cfg.tab_x)
+        dirty = true
+    end
+    if look.button('##xpbar_reset', g.left, g.button_cy, 'Reset position') then
+        if cfg.tab_x ~= DEFAULT_TAB_X then
             cfg.tab_x = DEFAULT_TAB_X
             dirty = true
         end
-        imgui.TextUnformatted('Drag the tab along the bar to place it.')
-        imgui.TextUnformatted('It stays on the top edge. The bar stays click-through.')
     end
-    imgui.End()
-    if config_state[1] == false then config_open = false end
+    look.hint(dl, g.left, g.hint_cy, 'Drag the tab along the bar.')
+end
+
+local function draw_config(max_x, shown_x)
+    local sw, sh = screen()
+    look.open_card(sw, sh)
+    local ok, err = pcall(function()
+        config_state[1] = true
+        local opened = imgui.Begin('XPBar###xpbar_config', config_state, CARD_FLAGS)
+        if opened then
+            local drew, draw_err = pcall(draw_inside, max_x, shown_x)
+            imgui.End()
+            if not drew then error(draw_err or 'settings failed', 0) end
+        else
+            imgui.End()
+        end
+        if config_state[1] == false then config_open = false end
+    end)
+    look.close_card()
+    if not ok then error(err or 'settings failed', 0) end
 end
 
 local function save_if_idle()
@@ -300,6 +299,8 @@ local function save_if_idle()
 end
 
 ashita.events.register('d3d_present', 'present_cb', function()
+    local w, h = screen()
+    local ready = look.begin_frame(h)
     local p = player()
     if p ~= nil then
         if state.need_seed then
@@ -315,26 +316,29 @@ ashita.events.register('d3d_present', 'present_cb', function()
 
     local preview = config_open
     if p == nil or (not shown and not preview) then
-        if preview then
-            local w = screen()
+        if preview and ready then
             draw_config(math.max(0, w - 80), cfg.tab_x)
+        else
+            look.dismiss()
         end
         save_if_idle()
         return
     end
 
-    local w, h = screen()
     local frac = progress.fraction(
         p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
     draw(w, h, frac)
 
-    local text = caption_for(p)
-    local tw, th = measure(text)
+    if not ready then
+        save_if_idle()
+        return
+    end
+
     local tab
-    if tw ~= nil and (cfg.show_rate or preview) then
-        tab = { draw_tab(w, h, text, tw, th) }
+    if cfg.show_rate or preview then
+        tab = { draw_tab(w, h, caption_for(p)) }
     end
     if preview then
         if tab ~= nil and tab[1] ~= nil then
@@ -343,6 +347,8 @@ ashita.events.register('d3d_present', 'present_cb', function()
         else
             draw_config(math.max(0, w - 80), cfg.tab_x)
         end
+    else
+        look.dismiss()
     end
     save_if_idle()
 end)

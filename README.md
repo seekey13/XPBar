@@ -20,7 +20,9 @@ A tab sits on the top edge of the bar. It shows the rate of whatever the bar is 
 
 The pace is the points addon's estimate: the average gain and the average gap over the last 50 gains, counting the wait since the last one. Experience comes from the gain lines (including a chain). Limit and capacity come from the same kill message that moves the bar. A gap longer than 15 minutes starts the estimate over.
 
-`/xpbar config` opens the placer. Drag the tab, or use the position slider. The choice is saved. The bar stays click-through. The tab only takes the pointer while that window is open.
+`/xpbar config` opens a settings card in the Vanacore window style: show or hide the rate, a position slider, and reset. Drag the tab along the bar, or use the slider. Click the slider's number to type one. The choice is saved. The bar stays click-through. The tab only takes the pointer while that card is open.
+
+The tab is an amber chip on the top edge of the bar, in that same style. The card is a dark rounded panel with the accent switch and slider.
 
 The fill is Vanacore amber, `#E8B45C`, at 70%. The unfilled track is Sidekick3's bar background while the pointer is off its HUD, `#0c0c0c` at 70%, with the same 1px `#0c0c0c` edge Sidekick3 draws on its bars.
 

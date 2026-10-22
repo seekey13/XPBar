@@ -1,5 +1,5 @@
 --[[
-The rate tab and the /xpbar settings card.
+The rate tab and the /xpb settings card.
 
 Drawn the way VanaCore's settings window is drawn, as Sidekick3 documents it
 in docs/vana-ui-style.md: an empty ImGui window, and every control painted on
@@ -473,8 +473,9 @@ function look.button(id, x, cy, label)
     return clicked == true, w
 end
 
-function look.tab_size(text)
-    local px = S(13)
+function look.tab_size(text, size)
+    local px = S(size or 13)
+    if px < 1 then px = 1 end
     local tw, th = measure(text, px, 'text')
     if tw == nil then return nil end
     local bw = math.max(S(30), math.floor(tw + S(14) + 0.5))
@@ -483,7 +484,7 @@ function look.tab_size(text)
 end
 
 -- Amber chip on the bar's top edge. The bottom stays square so it meets the bar.
-function look.paint_tab(dl, x, y, w, h, text, hot)
+function look.paint_tab(dl, x, y, w, h, text, hot, size)
     local radius = math.min(S(4), math.floor(h / 2))
     local plate = mix(P.well, P.amber, 0.18)
     local edge = mix(P.well_edge, P.amber, 0.6)
@@ -497,7 +498,8 @@ function look.paint_tab(dl, x, y, w, h, text, hot)
     else
         dl:AddRect(a, b, col, radius)
     end
-    local px = S(13)
+    local px = S(size or 13)
+    if px < 1 then px = 1 end
     text_centred(dl, x + w / 2 + 1, y + h / 2 + 1, text, '#000000', 0.90, 'text', px)
     text_centred(dl, x + w / 2, y + h / 2, text, P.amber, 1, 'text', px)
 end
@@ -509,7 +511,7 @@ local function metrics()
     local btn = S(24)
     local hint = S(16)
     local bottom = S(14)
-    local h = title_h + row * 2 + gap + btn + gap + hint + bottom
+    local h = title_h + row * 3 + gap + btn + gap + hint + bottom
     return S(360), h, S(6), title_h, row, gap, btn, hint
 end
 
@@ -557,9 +559,10 @@ function look.card(dl, wx, wy)
         title_h = title_h,
         left = x + S(24),
         show_cy = y + title_h + row * 0.5,
-        pos_cy = y + title_h + row * 1.5,
-        button_cy = y + title_h + row * 2 + gap + btn * 0.5,
-        hint_cy = y + title_h + row * 2 + gap + btn + gap + hint * 0.5,
+        size_cy = y + title_h + row * 1.5,
+        pos_cy = y + title_h + row * 2.5,
+        button_cy = y + title_h + row * 3 + gap + btn * 0.5,
+        hint_cy = y + title_h + row * 3 + gap + btn + gap + hint * 0.5,
         switch_x = right - S(32),
         slider_x = right - S(200),
         slider_w = S(200),

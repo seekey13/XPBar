@@ -4,7 +4,7 @@ XPBar - experience or merit progress along the bottom of the screen.
 A 6px bar from the lower left, the full width of the game window. A small
 tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
 (CP/hr when the bar is capacity points). The bar does not take mouse clicks.
-The tab does not either, except while /xpbar config is open, when it can be
+The tab does not either, except while /xpb is open, when it can be
 dragged. Colors of the bar are Sidekick3's HUD bar with the pointer off the
 panel: the near-black track at 70%, the Vanacore amber fill at 70%, and the
 1px near-black edge. The rate tab and the settings card follow that window
@@ -15,9 +15,9 @@ Copyright (c) 2026 Seekey. MIT License, see LICENSE.
 
 addon.name     = 'XPBar'
 addon.author   = 'Seekey'
-addon.version  = '1.2.0'
+addon.version  = '1.3.0'
 addon.desc     = 'XP and merit progress along the bottom of the screen, with an EXP/hr or MP/hr tab.'
-addon.commands = { '/xpbar' }
+addon.commands = { '/xpb' }
 
 require('common')
 local chat = require('chat')
@@ -35,6 +35,8 @@ local FILL_HEX, FILL_A = '#E8B45C', 0.70
 -- The 1px edge Sidekick3 draws on every bar (BAR_OFF at BAR_EDGE_A).
 local EDGE_HEX, EDGE_A = '#0c0c0c', 0.70
 local DEFAULT_TAB_X = 8
+local DEFAULT_TEXT = 13
+local TEXT_MIN, TEXT_MAX = 8, 32
 -- Used only when ImGui has not reported a window size yet.
 local FALLBACK_W, FALLBACK_H = 3440, 1440
 
@@ -52,12 +54,12 @@ local EDGE = col(EDGE_HEX, EDGE_A)
 
 local defaults = T{
     tab_x = DEFAULT_TAB_X,
+    text_size = DEFAULT_TEXT,
     show_rate = true,
 }
 
 local state = progress.new_state()
 local cfg = settings.load(defaults)
-local shown = true
 local config_open = false
 local config_state = { true }
 local dirty = false
@@ -99,6 +101,7 @@ end
 
 local function sanitize()
     cfg.tab_x = clamp_num(cfg.tab_x, 0, 8000, DEFAULT_TAB_X)
+    cfg.text_size = clamp_num(cfg.text_size, TEXT_MIN, TEXT_MAX, DEFAULT_TEXT)
     if cfg.show_rate == false or cfg.show_rate == 0 then
         cfg.show_rate = false
     else
@@ -189,13 +192,13 @@ local function place_tab(w, h, bw, bh)
 end
 
 local function draw_tab(w, h, text)
-    local bw, bh = look.tab_size(text)
+    local bw, bh = look.tab_size(text, cfg.text_size)
     if bw == nil or h < BAR_H + bh or w < 1 then return nil end
     -- A new `local bw, bh` here would hide the size just measured and pass nil.
     local x, y, max_x
     x, y, bw, bh, max_x = place_tab(w, h, bw, bh)
     if y < 0 then return nil end
-    look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text, config_open and look.over(x, y, bw, bh))
+    look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text, config_open and look.over(x, y, bw, bh), cfg.text_size)
     return x, y, bw, bh, max_x
 end
 
@@ -252,6 +255,12 @@ local function draw_inside(max_x, shown_x)
     local on, changed = look.switch('##xpbar_show', g.switch_x, g.show_cy, cfg.show_rate == true)
     if changed then
         cfg.show_rate = on
+        dirty = true
+    end
+    look.label(dl, g.left, g.size_cy, 'Text size')
+    local size, sized = look.slider('##xpbar_size', g.slider_x, g.size_cy, g.slider_w, cfg.text_size, TEXT_MIN, TEXT_MAX)
+    if sized then
+        cfg.text_size = clamp_num(size, TEXT_MIN, TEXT_MAX, DEFAULT_TEXT)
         dirty = true
     end
     look.label(dl, g.left, g.pos_cy, 'Position')
@@ -315,7 +324,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
     end
 
     local preview = config_open
-    if p == nil or (not shown and not preview) then
+    if p == nil then
         if preview and ready then
             draw_config(math.max(0, w - 80), cfg.tab_x)
         else
@@ -336,16 +345,22 @@ ashita.events.register('d3d_present', 'present_cb', function()
         return
     end
 
+    local text = caption_for(p)
+    local tw = look.tab_size(text, cfg.text_size)
+    local max_x = math.max(0, w - (tw or 80))
     local tab
-    if cfg.show_rate or preview then
-        tab = { draw_tab(w, h, caption_for(p)) }
+    -- The switch hides the tab at once, including while the card is open.
+    if cfg.show_rate and tw ~= nil then
+        tab = { draw_tab(w, h, text) }
     end
     if preview then
+        local shown_x = cfg.tab_x
+        if shown_x < 0 then shown_x = 0 elseif shown_x > max_x then shown_x = max_x end
         if tab ~= nil and tab[1] ~= nil then
             drag_tab(tab[1], tab[2], tab[3], tab[4], tab[5])
             draw_config(tab[5], tab[1])
         else
-            draw_config(math.max(0, w - 80), cfg.tab_x)
+            draw_config(max_x, shown_x)
         end
     else
         look.dismiss()
@@ -367,24 +382,10 @@ end)
 
 ashita.events.register('command', 'command_cb', function(e)
     local args = e.command:args()
-    if args[1] == nil or args[1]:lower() ~= '/xpbar' then return end
+    if args[1] == nil or args[1]:lower() ~= '/xpb' then return end
     e.blocked = true
-    local arg = args[2] and args[2]:lower() or ''
-    if arg == '' then
-        shown = not shown
-    elseif arg == 'on' or arg == 'show' then
-        shown = true
-    elseif arg == 'off' or arg == 'hide' then
-        shown = false
-    elseif arg == 'config' then
-        config_open = not config_open
-        say(config_open and 'Settings open. Drag the tab, or set its position.' or 'Settings closed.')
-        return
-    else
-        say('/xpbar shows or hides the bar. /xpbar on and /xpbar off set it. /xpbar config places the rate tab.')
-        return
-    end
-    say(shown and 'Shown.' or 'Hidden.')
+    config_open = not config_open
+    say(config_open and 'Settings open. Drag the tab, or set its position and text size.' or 'Settings closed.')
 end)
 
 ashita.events.register('unload', 'unload_cb', function()

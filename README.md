@@ -4,10 +4,7 @@ A 6px bar along the bottom of the game window, from the lower left across the fu
 
 ```
 /addon load XPBar
-/xpbar            show or hide
-/xpbar on
-/xpbar off
-/xpbar config     place the rate tab
+/xpb              settings for the rate tab
 ```
 
 The bar does not take mouse clicks. Its width follows the game window (3440×1440 is used only if that size cannot be read).
@@ -20,7 +17,7 @@ A tab sits on the top edge of the bar. It shows the rate of whatever the bar is 
 
 The pace is the points addon's estimate: the average gain and the average gap over the last 50 gains, counting the wait since the last one. Experience comes from the gain lines (including a chain). Limit and capacity come from the same kill message that moves the bar. A gap longer than 15 minutes starts the estimate over.
 
-`/xpbar config` opens a settings card in the Vanacore window style: show or hide the rate, a position slider, and reset. Drag the tab along the bar, or use the slider. Click the slider's number to type one. The choice is saved. The bar stays click-through. The tab only takes the pointer while that card is open.
+`/xpb` opens a settings card in the Vanacore window style: show or hide the rate, the tab's text size, a position slider, and reset. Drag the tab along the bar, or use the slider. Click a slider's number to type one. The choice is saved. The bar stays click-through. The tab only takes the pointer while that card is open. Turning the rate off hides the tab immediately.
 
 The tab is an amber chip on the top edge of the bar, in that same style. The card is a dark rounded panel with the accent switch and slider.
 

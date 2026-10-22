@@ -1,12 +1,22 @@
 --[[
 The rate tab and the /xpb settings card.
 
-Drawn the way VanaCore's settings window is drawn, as Sidekick3 documents it
-in docs/vana-ui-style.md: an empty ImGui window, and every control painted on
-a draw list. Sizes scale with the screen height. The experience bar itself
-is drawn by XPBar and stays a fixed 6px.
+Drawn the way Sidekick3 draws its windows (ui/kit.lua and ui/window.lua),
+after VanaCore's settings window as Sidekick3's docs/vana-ui-style.md tells
+it: an empty ImGui window, and every control painted on a draw list over an
+invisible button. The sizes, faces and colours are Sidekick Settings': a 44px
+title bar with the name in semibold 16 and Sidekick3's close mark, 30px rows
+with a hover band, 180px sliders, and values and buttons at 14. The card's
+sizes scale with the screen height. The tab's text is the pixels asked, as
+Sidekick3's HUD text is. The experience bar itself is drawn by XPBar and
+stays a fixed 6px.
 
-Copyright (c) 2026 Seekey. MIT License, see LICENSE.
+Based on Sidekick3's ui/kit.lua, which is based on VanaCore's
+addons/vanacore/vana/draw.lua, Copyright (C) 2026 Vekien (GPL-3.0-or-later).
+XPBar is GPL-3.0-or-later too (LICENSE); VanaCore's name and logo aren't
+licensed with it.
+
+Copyright (c) 2026 Seekey. SPDX-License-Identifier: GPL-3.0-or-later
 ]]--
 
 local imgui = require('imgui')
@@ -17,6 +27,7 @@ local look = {}
 local P = {
     bg = '#161822',
     border = '#2A2E3E',
+    line = '#242838',
     hover = '#1F2334',
     well = '#0E1017',
     well_edge = '#272B3C',
@@ -36,6 +47,13 @@ local P = {
     off = '#2B2F42',
 }
 
+-- Sidekick3's sizes, unscaled: its two text sizes (kit.BODY, kit.SMALL), and
+-- Sidekick Settings' title bar, row, margins, switch and slider.
+local BODY, SMALL = 16, 13.5
+local TITLE_H, ROW_H, LEFT, PAD = 44, 30, 24, 18
+local SW_W, SW_H, SLIDER_W = 32, 17, 180
+local CARD_W = 360
+
 -- 1.92 rounds with ImDrawFlags. 1.81 rounds with ImDrawCornerFlags. Missing
 -- means every corner, which is what a radius does when no flags are passed.
 local TOP_CORNERS = ImDrawFlags_RoundCornersTop or ImDrawCornerFlags_Top
@@ -44,6 +62,7 @@ local scale = 1
 local anim, last, dt = {}, nil, 0
 local fonts = {}
 local custom = false
+local broken = false
 local fonts_loaded = false
 local pending_fonts = nil
 local dynamic = (tonumber(IMGUI_VERSION_NUM) or 0) >= 19200
@@ -83,8 +102,6 @@ local function S(n)
     return math.floor(n * scale + 0.5)
 end
 
-look.S = S
-
 local function clear_cache()
     cache = {}
     cache_n = 0
@@ -115,9 +132,19 @@ local function read_wh(a, b)
     return w, h
 end
 
+-- Segoe UI once it is in; ImGui's own font until then, and always on 1.81.
+-- nil once drawing with a face has failed: then text is ImGui's font at its
+-- own size, with no size asked of it.
 local function face(which)
+    if broken then return nil end
     if which == 'semi' then return fonts.semi or fonts.text end
     return fonts.text
+end
+
+local function give_up()
+    custom = false
+    broken = true
+    clear_cache()
 end
 
 local function load_faces()
@@ -150,6 +177,11 @@ function look.begin_frame(screen_h)
         clear_cache()
         return true
     end
+    if not custom then
+        local ok, font = pcall(imgui.GetFont)
+        fonts.text = ok and font or nil
+        fonts.semi = nil
+    end
     if not fonts_loaded and dynamic then
         fonts_loaded = true
         local ok, added = pcall(load_faces)
@@ -162,26 +194,29 @@ function look.begin_frame(screen_h)
 end
 
 local function size_of(text, px, which)
-    if custom then
-        local font = face(which)
-        if font ~= nil then
-            local pushed = false
-            local ok, w, h = pcall(function()
-                imgui.PushFont(font, px)
-                pushed = true
-                local a, b = imgui.CalcTextSize(text)
-                imgui.PopFont()
-                pushed = false
-                return read_wh(a, b)
-            end)
-            if pushed then pcall(imgui.PopFont) end
-            if ok and w ~= nil then return w, h end
-            custom = false
-            clear_cache()
-        end
+    local font = face(which)
+    if custom and font ~= nil then
+        local pushed = false
+        local ok, w, h = pcall(function()
+            imgui.PushFont(font, px)
+            pushed = true
+            local a, b = imgui.CalcTextSize(text)
+            imgui.PopFont()
+            pushed = false
+            return read_wh(a, b)
+        end)
+        if pushed then pcall(imgui.PopFont) end
+        if ok and w ~= nil then return w, h end
+        give_up()
+        font = nil
     end
-    local a, b = imgui.CalcTextSize(text)
-    return read_wh(a, b)
+    local w, h = read_wh(imgui.CalcTextSize(text))
+    if w == nil or font == nil then return w, h end
+    -- ImGui's own font: measured at its own size, drawn at px, as Sidekick3
+    -- measures it on 1.81.
+    local base = tonumber(imgui.GetFontSize()) or 0
+    if base <= 0 then return w, h end
+    return w * px / base, h * px / base
 end
 
 local function measure(text, px, which)
@@ -202,13 +237,12 @@ local function text_at(dl, x, y, text, hex, alpha, which, px)
     y = math.floor(y + 0.5)
     local col = paint(hex, alpha)
     local font = face(which)
-    if custom and font ~= nil then
+    if font ~= nil then
         local ok = pcall(function()
             dl:AddText(font, px, { x, y }, col, text)
         end)
         if ok then return end
-        custom = false
-        clear_cache()
+        give_up()
     end
     dl:AddText({ x, y }, col, text)
 end
@@ -258,6 +292,8 @@ local function circle(dl, cx, cy, r, hex, alpha)
     dl:AddCircleFilled({ cx, cy }, r, paint(hex, alpha or 1), 24)
 end
 
+-- Sidekick3's close icon (kit.icon 'close'): two strokes across the middle
+-- half of `size`, a twelfth of it thick.
 local function cross(dl, cx, cy, size, hex, alpha)
     local arm = size * 0.25
     local thick = math.max(1, size / 12)
@@ -283,6 +319,12 @@ function look.over(x, y, w, h)
     return mx >= x and mx < x + w and my >= y and my < y + h
 end
 
+-- The pointer over a box of the window being drawn, with no item made for it
+-- (kit.over): false while another window or a popup is on top of it.
+local function hovering(x, y, w, h)
+    return imgui.IsWindowHovered() == true and imgui.IsMouseHoveringRect({ x, y }, { x + w, y + h }) == true
+end
+
 local function ease(id, target, speed)
     local v = anim[id]
     if v == nil then
@@ -295,10 +337,20 @@ local function ease(id, target, speed)
     return v
 end
 
+-- Eased like any other value while it rises, and set at once when it falls,
+-- so a bar that starts over after a level or a merit does not sweep back.
+function look.rise(id, target, speed)
+    local v = anim[id]
+    if v ~= nil and target < v then anim[id] = target end
+    return ease(id, target, speed)
+end
+
+-- The input half of a control: hovered, clicked (let go over it, as an ImGui
+-- button is), held.
 local function hit(id, x, y, w, h)
     imgui.SetCursorScreenPos({ x, y })
-    imgui.InvisibleButton(id, { math.max(1, w), math.max(1, h) })
-    return imgui.IsItemHovered(), imgui.IsItemClicked(0), imgui.IsItemActive()
+    local clicked = imgui.InvisibleButton(id, { math.max(1, w), math.max(1, h) })
+    return imgui.IsItemHovered(), clicked == true, imgui.IsItemActive()
 end
 
 local cached_flags = nil
@@ -326,31 +378,30 @@ local function snap(v, min, max)
     return v
 end
 
+-- Sidekick3's popup style (kit.push_popup_style), with the padding and
+-- spacing the card's window takes away.
 local function push_popup()
     imgui.PushStyleColor(ImGuiCol_PopupBg, rgba(P.popup))
-    imgui.PushStyleColor(ImGuiCol_WindowBg, rgba(P.popup))
     imgui.PushStyleColor(ImGuiCol_Border, rgba(P.border))
+    imgui.PushStyleColor(ImGuiCol_Text, rgba(P.text))
     imgui.PushStyleColor(ImGuiCol_Header, rgba(P.accent_bg))
     imgui.PushStyleColor(ImGuiCol_HeaderHovered, rgba(P.hover))
     imgui.PushStyleColor(ImGuiCol_HeaderActive, rgba(P.accent_lo))
-    imgui.PushStyleColor(ImGuiCol_Text, rgba(P.text))
-    imgui.PushStyleColor(ImGuiCol_TextDisabled, rgba(P.faint))
+    imgui.PushStyleColor(ImGuiCol_Separator, rgba(P.line))
     imgui.PushStyleColor(ImGuiCol_FrameBg, rgba(P.well))
     imgui.PushStyleColor(ImGuiCol_FrameBgHovered, rgba(P.well))
     imgui.PushStyleColor(ImGuiCol_FrameBgActive, rgba(P.well))
     imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, { S(10), S(8) })
-    imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, S(5))
-    imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1)
     imgui.PushStyleVar(ImGuiStyleVar_PopupRounding, S(5))
     imgui.PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1)
     imgui.PushStyleVar(ImGuiStyleVar_FramePadding, { S(8), S(4) })
     imgui.PushStyleVar(ImGuiStyleVar_FrameRounding, S(4))
-    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, { S(8), S(8) })
+    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, { S(8), S(6) })
 end
 
 local function pop_popup()
-    imgui.PopStyleVar(8)
-    imgui.PopStyleColor(11)
+    imgui.PopStyleVar(6)
+    imgui.PopStyleColor(10)
 end
 
 -- The number typed into the slider's box, once Enter is pressed.
@@ -369,7 +420,7 @@ local function take_typed(id, min, max)
                 typing.focus = false
             end
             if custom and fonts.text ~= nil then
-                pushed = pcall(imgui.PushFont, fonts.text, S(14.5)) == true
+                pushed = pcall(imgui.PushFont, fonts.text, S(SMALL + 1)) == true
             end
             imgui.PushItemWidth(S(90))
             local submitted = imgui.InputText('##xpbar_typed', typing.text, 16, type_flags())
@@ -391,11 +442,10 @@ local function take_typed(id, min, max)
 end
 
 function look.switch(id, x, cy, on)
-    local w, h = S(32), S(17)
+    local w, h = S(SW_W), S(SW_H)
     local y = cy - h / 2
     local hovered, clicked = hit(id, x, y, w, h)
-    local changed = clicked == true
-    if changed then on = not on end
+    if clicked then on = not on end
     local t = ease(id, on and 1 or 0, 18)
     local dl = imgui.GetWindowDrawList()
     fill(dl, x, y, w, h, mix(P.off, P.accent, t), h / 2, 1)
@@ -405,10 +455,13 @@ function look.switch(id, x, cy, on)
     local x0 = x + inset + r
     local x1 = x + w - inset - r
     circle(dl, x0 + (x1 - x0) * t, cy, r, P.knob, 1)
-    return on == true, changed
+    return on == true, clicked
 end
 
-function look.slider(id, x, cy, w, value, min, max)
+-- `alpha` fades the whole slider, as Sidekick3 fades a row it still lets you
+-- set. `unit` follows the value ('px').
+function look.slider(id, x, cy, w, value, min, max, alpha, unit)
+    local a = alpha or 1
     if max < min then max = min end
     local shown = snap(value, min, max)
     local changed = shown ~= value
@@ -436,19 +489,19 @@ function look.slider(id, x, cy, w, value, min, max)
     local dl = imgui.GetWindowDrawList()
     local th = S(4)
     if th < 1 then th = 1 end
-    fill(dl, x, cy - th / 2, track, th, P.off, th / 2, 1)
+    fill(dl, x, cy - th / 2, track, th, P.off, th / 2, a)
     if frac > 0 then
-        fill(dl, x, cy - th / 2, math.max(th, track * frac), th, P.accent, th / 2, 1)
+        fill(dl, x, cy - th / 2, math.max(th, track * frac), th, P.accent, th / 2, a)
     end
     local lit = ease(id .. '.lit', (hovered or active) and 1 or 0, 22)
     local knob = P.accent2
     if not active then knob = mix(P.knob, P.accent2, lit * 0.5) end
-    circle(dl, x + track * frac, cy, S(5.5) + S(1) * lit, knob, 1)
+    circle(dl, x + track * frac, cy, S(5.5) + S(1) * lit, knob, a)
     local vx = x + track + gap
     local vh = S(20)
     local vhov, vclick = hit(id .. '.value', vx, cy - vh / 2, value_w, vh)
     if vhov then fill(dl, vx, cy - vh / 2, value_w, vh, P.hover, S(3), 1) end
-    text_right(dl, vx + value_w - S(4), cy, tostring(value), P.text2, 1, 'text', S(14.5))
+    text_right(dl, vx + value_w - S(4), cy, tostring(value) .. (unit or ''), P.text2, a, 'text', S(SMALL + 0.5))
     if vclick then
         typing = { id = id, popup = id .. '.n', text = { tostring(value) }, focus = true }
         imgui.OpenPopup(typing.popup)
@@ -458,34 +511,49 @@ function look.slider(id, x, cy, w, value, min, max)
     return value, changed
 end
 
-function look.button(id, x, cy, label)
-    local px = S(14.5)
+function look.button(id, x, cy, label, alpha)
+    local a = alpha or 1
+    local px = S(SMALL + 0.5)
     local tw = measure(label, px, 'text') or S(40)
     local w, h = tw + S(22), S(24)
     local y = cy - h / 2
     local hovered, clicked, active = hit(id, x, y, w, h)
     local t = ease(id, hovered and 1 or 0, 22)
     local dl = imgui.GetWindowDrawList()
-    fill(dl, x, y, w, h, mix(P.well, P.hover, t), S(4), 1)
-    outline(dl, x, y, w, h, mix(P.well_edge, P.accent_lo, t), S(4), 1)
+    fill(dl, x, y, w, h, mix(P.well, P.hover, t), S(4), a)
+    outline(dl, x, y, w, h, mix(P.well_edge, P.accent_lo, t), S(4), a)
     if active then fill(dl, x, y, w, h, '#000000', S(4), 0.15) end
-    text_centred(dl, x + w / 2, cy, label, mix(P.text2, P.text, t), 1, 'text', px)
-    return clicked == true, w
+    text_centred(dl, x + w / 2, cy, label, mix(P.text2, P.text, t), a, 'text', px)
+    return clicked, w
+end
+
+-- The tab's text is `size` pixels, not scaled with the screen, as Sidekick3's
+-- HUD text is. Its chip is kit.chip's (13 text, 20 high, 14 wider than the
+-- text, radius 4, at least 30 wide), grown with the text instead.
+local CHIP_TEXT = SMALL - 0.5
+
+local function tab_px(size)
+    local px = math.floor((tonumber(size) or 14) + 0.5)
+    if px < 1 then px = 1 end
+    return px
 end
 
 function look.tab_size(text, size)
-    local px = S(size or 13)
-    if px < 1 then px = 1 end
+    local px = tab_px(size)
+    local k = px / CHIP_TEXT
     local tw, th = measure(text, px, 'text')
     if tw == nil then return nil end
-    local bw = math.max(S(30), math.floor(tw + S(14) + 0.5))
-    local bh = math.max(S(20), math.floor(th + S(6) + 0.5))
+    local bw = math.max(math.floor(30 * k + 0.5), math.floor(tw + 14 * k + 0.5))
+    local bh = math.max(math.floor(20 * k + 0.5), math.floor(th + 6 * k + 0.5))
     return bw, bh
 end
 
--- Amber chip on the bar's top edge. The bottom stays square so it meets the bar.
+-- Amber chip on the bar's top edge: Sidekick3's 'held' chip, its plate a
+-- touch of amber over the well, its edge more, its text amber. The bottom
+-- stays square so it meets the bar.
 function look.paint_tab(dl, x, y, w, h, text, hot, size)
-    local radius = math.min(S(4), math.floor(h / 2))
+    local px = tab_px(size)
+    local radius = math.min(math.floor(4 * px / CHIP_TEXT + 0.5), math.floor(h / 2))
     local plate = mix(P.well, P.amber, 0.18)
     local edge = mix(P.well_edge, P.amber, 0.6)
     fill_top(dl, x - 1, y - 2, w + 2, h + 2, '#000000', radius, 0.30)
@@ -498,21 +566,15 @@ function look.paint_tab(dl, x, y, w, h, text, hot, size)
     else
         dl:AddRect(a, b, col, radius)
     end
-    local px = S(size or 13)
-    if px < 1 then px = 1 end
-    text_centred(dl, x + w / 2 + 1, y + h / 2 + 1, text, '#000000', 0.90, 'text', px)
     text_centred(dl, x + w / 2, y + h / 2, text, P.amber, 1, 'text', px)
 end
 
+-- The card from the top: the title bar and its line, 10 more, three rows, the
+-- button's row (a row and 4, as Sidekick3's button rows), a line of hint
+-- (22, as its notes), and 14 under it, as under one of its sections.
 local function metrics()
-    local title_h = S(36)
-    local row = S(27)
-    local gap = S(8)
-    local btn = S(24)
-    local hint = S(16)
-    local bottom = S(14)
-    local h = title_h + row * 3 + gap + btn + gap + hint + bottom
-    return S(360), h, S(6), title_h, row, gap, btn, hint
+    local h = S(TITLE_H) + 1 + S(10) + S(ROW_H) * 4 + S(4) + S(22) + S(14)
+    return S(CARD_W), h, S(6)
 end
 
 function look.window_size()
@@ -544,32 +606,35 @@ function look.close_card()
 end
 
 function look.card(dl, wx, wy)
-    local w, h, m, title_h, row, gap, btn, hint = metrics()
+    local w, h, m = metrics()
     local x = math.floor(wx + m + 0.5)
     local y = math.floor(wy + m + 0.5)
     fill(dl, x - 1, y, w + 2, h + 2, '#000000', S(6), 0.35)
     fill(dl, x, y, w, h, P.bg, S(5), 1)
     outline(dl, x, y, w, h, P.border, S(5), 1)
-    local right = x + w - S(18)
+    local right = x + w - S(PAD)
+    local row = S(ROW_H)
+    local top = y + S(TITLE_H) + 1 + S(10)
     return {
         x = x,
         y = y,
         w = w,
         h = h,
-        title_h = title_h,
-        left = x + S(24),
-        show_cy = y + title_h + row * 0.5,
-        size_cy = y + title_h + row * 1.5,
-        pos_cy = y + title_h + row * 2.5,
-        button_cy = y + title_h + row * 3 + gap + btn * 0.5,
-        hint_cy = y + title_h + row * 3 + gap + btn + gap + hint * 0.5,
-        switch_x = right - S(32),
-        slider_x = right - S(200),
-        slider_w = S(200),
+        left = x + S(LEFT),
+        show_y = top,
+        size_y = top + row,
+        pos_y = top + row * 2,
+        button_y = top + row * 3,
+        button_h = row + S(4),
+        hint_cy = top + row * 4 + S(4) + S(11),
+        switch_x = right - S(SW_W),
+        slider_x = right - S(SLIDER_W),
+        slider_w = S(SLIDER_W),
     }
 end
 
--- Choco's header tooltip: Segoe 14, popup ground, 9 by 6 padding, radius 4.
+-- Sidekick3's tooltip (kit.tooltip): Segoe 14, popup ground, 9 by 6 padding,
+-- radius 4.
 local function tooltip(str)
     if str == nil or str == '' then return end
     imgui.PushStyleColor(ImGuiCol_PopupBg, rgba(P.popup, 0.97))
@@ -577,42 +642,50 @@ local function tooltip(str)
     imgui.PushStyleColor(ImGuiCol_Text, rgba(P.text))
     imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, { S(9), S(6) })
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, S(4))
+    imgui.PushStyleVar(ImGuiStyleVar_PopupRounding, S(4))
     imgui.PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1)
     local pushed = false
     if custom and fonts.text ~= nil then
-        pushed = pcall(imgui.PushFont, fonts.text, S(14)) == true
+        pushed = pcall(imgui.PushFont, fonts.text, S(SMALL + 0.5)) == true
     end
     local ok, err = pcall(imgui.SetTooltip, (tostring(str):gsub('%%', '%%%%')))
     if pushed then imgui.PopFont() end
-    imgui.PopStyleVar(3)
+    imgui.PopStyleVar(4)
     imgui.PopStyleColor(3)
     if not ok then error(err, 0) end
 end
 
--- App name and close mark, sized the way Choco's header is. The name is
--- semibold 19. The mark is a 12px cross in a 22px target, inset 16 from the
--- plate, and it eases from dim to rose.
+-- The name and the close mark, as Sidekick Settings' title bar: the name in
+-- semibold 16 at the left margin; the mark, 0.72 of a 21px box at the right
+-- margin, dim until the pointer is on it, then rose; a line under them.
 function look.title(dl, g, open)
-    local cy = g.y + g.title_h * 0.5
-    local pad = S(16)
-    text_mid(dl, g.x + pad, cy, 'XPBar', P.white, 1, 'semi', S(19))
-    local box = S(22)
-    local cx = g.x + g.w - pad - box * 0.5
-    local hovered, clicked = hit('##xpbar_close', cx - box * 0.5, cy - box * 0.5, box, box)
-    local t = ease('xpbar.close', hovered and 1 or 0, 22)
-    cross(dl, cx, cy, S(12), mix(P.dim, P.rose, t), 1)
+    local cy = g.y + S(TITLE_H) / 2
+    text_mid(dl, g.left, cy, 'XPBar', P.white, 1, 'semi', S(BODY))
+    local box = S(21)
+    local cx = g.x + g.w - S(PAD) - box / 2
+    local hovered, clicked = hit('##xpbar_close', cx - box / 2, cy - box / 2, box, box)
+    cross(dl, cx, cy, box * 0.72, hovered and P.rose or P.dim, 1)
     if hovered then tooltip('Close') end
     if clicked then open[1] = false end
-    local ly = math.floor(g.y + g.title_h + 0.5)
+    local ly = g.y + S(TITLE_H)
     dl:AddLine({ g.x, ly }, { g.x + g.w, ly }, paint(P.border, 1), 1)
 end
 
-function look.label(dl, x, cy, text)
-    text_mid(dl, x, cy, text, P.text, 1, 'text', S(16))
+-- A row of the card from y, `h` tall (one row unless given), as Sidekick
+-- Settings draws one: the hover band, the label, and `help` while the pointer
+-- is on the label's half. Returns the middle its control goes on.
+function look.row(dl, g, y, label, help, alpha, h)
+    h = h or S(ROW_H)
+    local bx, bw = g.x + S(4), g.w - S(8)
+    if hovering(bx, y, bw, h) then fill(dl, bx, y, bw, h, P.hover, S(3), 0.8) end
+    local cy = y + math.min(h, S(ROW_H)) / 2
+    if label ~= nil then text_mid(dl, g.left, cy, label, P.text, alpha, 'text', S(BODY)) end
+    if help ~= nil and hovering(g.x, y, g.w / 2, h) then tooltip(help) end
+    return cy
 end
 
-function look.hint(dl, x, cy, text)
-    text_mid(dl, x, cy, text, P.faint, 1, 'text', S(13.5))
+function look.hint(dl, x, cy, text, alpha)
+    text_mid(dl, x, cy, text, P.faint, alpha, 'text', S(SMALL + 0.5))
 end
 
 function look.dismiss()

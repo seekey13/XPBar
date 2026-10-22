@@ -7,10 +7,17 @@ tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
 The tab does not either, except while /xpb is open, when it can be
 dragged. Colors of the bar are Sidekick3's HUD bar with the pointer off the
 panel: the near-black track at 70%, the Vanacore amber fill at 70%, and the
-1px near-black edge. The rate tab and the settings card follow that window
-style (look.lua): a dark rounded card, and an amber chip on the bar.
+1px near-black edge. The fill eases up as Sidekick3's bars do. The rate tab
+and the settings card follow Sidekick3's window style (look.lua): a dark
+rounded card, and an amber chip on the bar.
 
-Copyright (c) 2026 Seekey. MIT License, see LICENSE.
+Copyright (c) 2026 Seekey
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version. It is
+distributed WITHOUT ANY WARRANTY; see LICENSE for the details.
+SPDX-License-Identifier: GPL-3.0-or-later
 ]]--
 
 addon.name     = 'XPBar'
@@ -35,8 +42,9 @@ local FILL_HEX, FILL_A = '#E8B45C', 0.70
 -- The 1px edge Sidekick3 draws on every bar (BAR_OFF at BAR_EDGE_A).
 local EDGE_HEX, EDGE_A = '#0c0c0c', 0.70
 local DEFAULT_TAB_X = 8
-local DEFAULT_TEXT = 13
-local TEXT_MIN, TEXT_MAX = 8, 32
+-- The tab's text in pixels, as Sidekick3's HUD "Text font size" is, and its range.
+local DEFAULT_TEXT = 14
+local TEXT_MIN, TEXT_MAX = 8, 48
 -- Used only when ImGui has not reported a window size yet.
 local FALLBACK_W, FALLBACK_H = 3440, 1440
 
@@ -216,8 +224,26 @@ local function caption_for(p)
     return progress.rate_text(mode, progress.per_hour(bucket, os.clock()))
 end
 
+local function drag_inside(x, bw, bh, max_x)
+    imgui.SetCursorPos({ 0, 0 })
+    imgui.InvisibleButton('##xpbar_tab_drag', { bw, bh })
+    if imgui.IsItemHovered() and ImGuiMouseCursor_ResizeEW ~= nil then
+        imgui.SetMouseCursor(ImGuiMouseCursor_ResizeEW)
+    end
+    if imgui.IsItemActivated() then drag_origin = x end
+    if imgui.IsItemActive() and drag_origin ~= nil then
+        local dx = xy(imgui.GetMouseDragDelta(0))
+        local nx = clamp_num(drag_origin + dx, 0, max_x, cfg.tab_x)
+        if nx ~= cfg.tab_x then
+            cfg.tab_x = nx
+            dirty = true
+        end
+    end
+end
+
 -- While the settings are open, the tab takes the pointer so a drag sets its
--- place along the bar. The bar under it stays click-through.
+-- place along the bar. The bar under it stays click-through. An error inside
+-- still reaches End: ImGui stops the game on a window left open.
 local function drag_tab(x, y, bw, bh, max_x)
     imgui.SetNextWindowPos({ x, y }, ImGuiCond_Always)
     imgui.SetNextWindowSize({ bw, bh }, ImGuiCond_Always)
@@ -225,61 +251,58 @@ local function drag_tab(x, y, bw, bh, max_x)
     imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0)
     imgui.PushStyleVar(ImGuiStyleVar_WindowMinSize, { 1, 1 })
     drag_state[1] = true
+    local ok, err = true, nil
     if imgui.Begin('XPBar###xpbar_tab_drag', drag_state, DRAG_FLAGS) then
-        imgui.SetCursorPos({ 0, 0 })
-        imgui.InvisibleButton('##xpbar_tab_drag', { bw, bh })
-        if imgui.IsItemHovered() and ImGuiMouseCursor_ResizeEW ~= nil then
-            imgui.SetMouseCursor(ImGuiMouseCursor_ResizeEW)
-        end
-        if imgui.IsItemActivated() then drag_origin = x end
-        if imgui.IsItemActive() and drag_origin ~= nil then
-            local dx = xy(imgui.GetMouseDragDelta(0))
-            local nx = clamp_num(drag_origin + dx, 0, max_x, cfg.tab_x)
-            if nx ~= cfg.tab_x then
-                cfg.tab_x = nx
-                dirty = true
-            end
-        end
+        ok, err = pcall(drag_inside, x, bw, bh, max_x)
     end
     imgui.End()
     imgui.PopStyleVar(3)
     if not imgui.IsMouseDown(0) then drag_origin = nil end
+    if not ok then error(err or 'drag failed', 0) end
 end
+
+local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points.'
+local SIZE_HELP = 'The tab\'s text in pixels, as Sidekick3\'s HUD text sizes are. The tab grows with it.'
+local POS_HELP = 'Pixels from the left of the screen to the tab. Click the number to type one.'
 
 local function draw_inside(max_x, shown_x)
     local wx, wy = xy(imgui.GetCursorScreenPos())
     local dl = imgui.GetWindowDrawList()
     local g = look.card(dl, wx, wy)
     look.title(dl, g, config_state)
-    look.label(dl, g.left, g.show_cy, 'Show rate')
-    local on, changed = look.switch('##xpbar_show', g.switch_x, g.show_cy, cfg.show_rate == true)
+    local cy = look.row(dl, g, g.show_y, 'Show rate', SHOW_HELP)
+    local on, changed = look.switch('##xpbar_show', g.switch_x, cy, cfg.show_rate == true)
     if changed then
         cfg.show_rate = on
         dirty = true
     end
-    look.label(dl, g.left, g.size_cy, 'Text size')
-    local size, sized = look.slider('##xpbar_size', g.slider_x, g.size_cy, g.slider_w, cfg.text_size, TEXT_MIN, TEXT_MAX)
+    -- With the rate off, the tab's rows fade and can still be set, as
+    -- Sidekick3 draws the rows of a section switched off.
+    local a = cfg.show_rate and 1 or 0.55
+    cy = look.row(dl, g, g.size_y, 'Text size', SIZE_HELP, a)
+    local size, sized = look.slider('##xpbar_size', g.slider_x, cy, g.slider_w, cfg.text_size, TEXT_MIN, TEXT_MAX, a, 'px')
     if sized then
         cfg.text_size = clamp_num(size, TEXT_MIN, TEXT_MAX, DEFAULT_TEXT)
         dirty = true
     end
-    look.label(dl, g.left, g.pos_cy, 'Position')
+    cy = look.row(dl, g, g.pos_y, 'Position', POS_HELP, a)
     local slider_max = max_x
     if slider_max < 0 then slider_max = 0 end
     local shown = shown_x
     if shown < 0 then shown = 0 elseif shown > slider_max then shown = slider_max end
-    local pos, moved = look.slider('##xpbar_x', g.slider_x, g.pos_cy, g.slider_w, shown, 0, slider_max)
+    local pos, moved = look.slider('##xpbar_x', g.slider_x, cy, g.slider_w, shown, 0, slider_max, a, 'px')
     if moved then
         cfg.tab_x = clamp_num(pos, 0, max_x, cfg.tab_x)
         dirty = true
     end
-    if look.button('##xpbar_reset', g.left, g.button_cy, 'Reset position') then
+    cy = look.row(dl, g, g.button_y, nil, nil, a, g.button_h)
+    if look.button('##xpbar_reset', g.left, cy, 'Reset position', a) then
         if cfg.tab_x ~= DEFAULT_TAB_X then
             cfg.tab_x = DEFAULT_TAB_X
             dirty = true
         end
     end
-    look.hint(dl, g.left, g.hint_cy, 'Drag the tab along the bar.')
+    look.hint(dl, g.left, g.hint_cy, 'Drag the tab along the bar.', a)
 end
 
 local function draw_config(max_x, shown_x)
@@ -301,6 +324,19 @@ local function draw_config(max_x, shown_x)
     if not ok then error(err or 'settings failed', 0) end
 end
 
+-- The tab's drag handle and the card. An error in either closes the card,
+-- which would fail again every frame, and says why once.
+local function draw_settings(tab, max_x, shown_x)
+    local ok, err = pcall(function()
+        if tab ~= nil then drag_tab(tab[1], tab[2], tab[3], tab[4], tab[5]) end
+        draw_config(max_x, shown_x)
+    end)
+    if ok then return end
+    config_open = false
+    look.dismiss()
+    say('Settings closed after an error: ' .. tostring(err))
+end
+
 local function save_if_idle()
     if not dirty or imgui.IsMouseDown(0) or imgui.IsAnyItemActive() then return end
     local ok = pcall(function() settings.save() end)
@@ -312,6 +348,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
     local ready = look.begin_frame(h)
     local p = player()
     if p ~= nil then
+        progress.job_rates(state, p:GetMainJob())
         if state.need_seed then
             seed(p)
         else
@@ -326,7 +363,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
     local preview = config_open
     if p == nil then
         if preview and ready then
-            draw_config(math.max(0, w - 80), cfg.tab_x)
+            draw_settings(nil, math.max(0, w - 80), cfg.tab_x)
         else
             look.dismiss()
         end
@@ -338,7 +375,8 @@ ashita.events.register('d3d_present', 'present_cb', function()
         p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
-    draw(w, h, frac)
+    -- Eased up at Sidekick3's bar speed; a level or a merit starts it over at once.
+    draw(w, h, look.rise('xpbar.fill', frac, 12))
 
     if not ready then
         save_if_idle()
@@ -357,10 +395,9 @@ ashita.events.register('d3d_present', 'present_cb', function()
         local shown_x = cfg.tab_x
         if shown_x < 0 then shown_x = 0 elseif shown_x > max_x then shown_x = max_x end
         if tab ~= nil and tab[1] ~= nil then
-            drag_tab(tab[1], tab[2], tab[3], tab[4], tab[5])
-            draw_config(tab[5], tab[1])
+            draw_settings(tab, tab[5], tab[1])
         else
-            draw_config(max_x, shown_x)
+            draw_settings(nil, max_x, shown_x)
         end
     else
         look.dismiss()

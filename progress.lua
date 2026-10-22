@@ -8,13 +8,14 @@
     level 99 bar, 0 to 30000) are seeded from memory, then moved by the kill
     message (0x02D) and replaced by the character update (0x063).
 
-    The rate is the points addon's estimate. Each gain keeps the gap since
-    the one before it (the first gap is 1 second, as that addon stores it).
-    Per hour is the average gain divided by the average gap, including the
-    wait since the last gain, times 3600. Fifty gains are kept. MP/hr is
-    that limit-point pace divided by 10000, since one merit is 10000 limit
-    points. A gap longer than RATE_IDLE starts the estimate over: the points
-    addon keeps the stale gaps, which holds the pace down until 50 new kills.
+    The rate is the points gained since the first of the last fifty gains,
+    over the time since that gain (the wait since the last gain included),
+    times 3600. The first gain only starts the clock: what it brought was
+    earned before it, so counting it reads high (one kill would read as a
+    kill a second). Under two gains there is no pace yet, and it reads 0.
+    MP/hr is that limit-point pace divided by 10000, since one merit is
+    10000 limit points. A gap longer than RATE_IDLE starts the estimate
+    over, and so does a new main job.
 ]]--
 
 local progress = {}
@@ -105,48 +106,59 @@ function progress.note(rate, amount, now)
         rate.samples = {}
         rate.last = nil
     end
-    local dt = 1
-    if rate.last ~= nil then
-        dt = now - rate.last
-        if dt < 0 then dt = 0 end
-    end
-    rate.samples[#rate.samples + 1] = { dt = dt, n = amount }
+    -- A clock that steps back counts as the same moment as the last gain.
+    if rate.last ~= nil and now < rate.last then now = rate.last end
+    rate.samples[#rate.samples + 1] = { at = now, n = amount }
     rate.last = now
     while #rate.samples > progress.RATE_KEEP do
         table.remove(rate.samples, 1)
     end
 end
 
--- Points per hour for one bucket. 0 when there is no gain, or the last gain
+-- Points per hour for one bucket. 0 under two gains, or when the last gain
 -- is older than RATE_IDLE. Limit points, not merits: rate_text scales those.
 function progress.per_hour(rate, now)
     if rate == nil or rate.last == nil then return 0 end
     local samples = rate.samples
     local count = #samples
-    if count == 0 then return 0 end
+    if count < 2 then return 0 end
     now = tonumber(now)
     if now == nil or now ~= now then return 0 end
-    local idle = now - rate.last
-    if idle < 0 then idle = 0 end
-    if idle > progress.RATE_IDLE then return 0 end
+    if now - rate.last > progress.RATE_IDLE then return 0 end
+    if now < rate.last then now = rate.last end
 
-    local sum_n, sum_dt = 0, 0
-    for i = 1, count do
+    local span = now - samples[1].at
+    if span <= 0 then return 0 end
+    local sum_n = 0
+    for i = 2, count do
         sum_n = sum_n + samples[i].n
-        sum_dt = sum_dt + samples[i].dt
     end
-    local avg_dt = (sum_dt + idle) / (count + 1)
-    if avg_dt <= 0 then return 0 end
-    local per = (sum_n / count) / avg_dt * 3600
+    local per = sum_n / span * 3600
     if per ~= per or per < 0 then return 0 end
     return per
 end
 
+-- The main job the rates are for. A new one starts them over: the last job's
+-- pace says nothing about this one. Returns true when it did.
+function progress.job_rates(state, job)
+    job = tonumber(job)
+    if job == nil or job <= 0 or state.rate_job == job then return false end
+    local had = state.rate_job ~= nil
+    state.rate_job = job
+    if not had then return false end
+    state.exp_rate = progress.new_rate()
+    state.limit_rate = progress.new_rate()
+    state.capacity_rate = progress.new_rate()
+    return true
+end
+
+-- Each cut is where the shorter form would round up into the next one, so
+-- 999960 reads 1.0m, not 1000.0k, and 9999.6 reads 10.0k, not 10000.
 local function abbrev(n)
-    if n >= 1000000 then
+    if n >= 999950 then
         return string.format('%.1fm', n / 1000000)
     end
-    if n >= 10000 then
+    if n >= 9999.5 then
         return string.format('%.1fk', n / 1000)
     end
     return string.format('%d', math.floor(n + 0.5))

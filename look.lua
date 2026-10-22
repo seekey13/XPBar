@@ -569,14 +569,39 @@ function look.card(dl, wx, wy)
     }
 end
 
+-- Choco's header tooltip: Segoe 14, popup ground, 9 by 6 padding, radius 4.
+local function tooltip(str)
+    if str == nil or str == '' then return end
+    imgui.PushStyleColor(ImGuiCol_PopupBg, rgba(P.popup, 0.97))
+    imgui.PushStyleColor(ImGuiCol_Border, rgba(P.border))
+    imgui.PushStyleColor(ImGuiCol_Text, rgba(P.text))
+    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, { S(9), S(6) })
+    imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, S(4))
+    imgui.PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1)
+    local pushed = false
+    if custom and fonts.text ~= nil then
+        pushed = pcall(imgui.PushFont, fonts.text, S(14)) == true
+    end
+    local ok, err = pcall(imgui.SetTooltip, (tostring(str):gsub('%%', '%%%%')))
+    if pushed then imgui.PopFont() end
+    imgui.PopStyleVar(3)
+    imgui.PopStyleColor(3)
+    if not ok then error(err, 0) end
+end
+
+-- App name and close mark, sized the way Choco's header is. The name is
+-- semibold 19. The mark is a 12px cross in a 22px target, inset 16 from the
+-- plate, and it eases from dim to rose.
 function look.title(dl, g, open)
     local cy = g.y + g.title_h * 0.5
-    text_mid(dl, g.left, cy, 'XPBar', P.white, 1, 'semi', S(16))
-    local box = S(21)
-    local cx = g.x + g.w - S(18) - box * 0.5
+    local pad = S(16)
+    text_mid(dl, g.x + pad, cy, 'XPBar', P.white, 1, 'semi', S(19))
+    local box = S(22)
+    local cx = g.x + g.w - pad - box * 0.5
     local hovered, clicked = hit('##xpbar_close', cx - box * 0.5, cy - box * 0.5, box, box)
     local t = ease('xpbar.close', hovered and 1 or 0, 22)
-    cross(dl, cx, cy, box * 0.72, mix(P.dim, P.rose, t), 1)
+    cross(dl, cx, cy, S(12), mix(P.dim, P.rose, t), 1)
+    if hovered then tooltip('Close') end
     if clicked then open[1] = false end
     local ly = math.floor(g.y + g.title_h + 0.5)
     dl:AddLine({ g.x, ly }, { g.x + g.w, ly }, paint(P.border, 1), 1)

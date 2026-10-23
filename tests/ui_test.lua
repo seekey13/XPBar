@@ -36,7 +36,8 @@ for i, name in ipairs(CONSTANTS) do rawset(_G, name, 2 ^ (i - 1)) end
 
 local screen_h = 1440
 local f        -- this frame: { stack, vars, ids, windows, drawn, tips, tip_px, typed_px, window, popup, tooltip }
-local input    -- what the pointer does this frame: click, hover, active, activated, down, drag, mouse, typed
+local input    -- what the pointer does this frame: click, hover, active, activated, down, drag, mouse, typed;
+               -- and what ImGui refuses: tip_shut (1.92's BeginTooltip), no_scale (SetWindowFontScale)
 local popups = {}
 local font_size, font_stack = 13, {}
 local window_scale = 1  -- SetWindowFontScale on the window now open
@@ -98,6 +99,7 @@ local imgui = {
     end,
     SetWindowFontScale = function(k)
         assert(f.window or f.popup or f.tooltip, 'SetWindowFontScale outside a window')
+        if input.no_scale then error('no font scale') end
         window_scale = k
     end,
     CalcTextSize = function(s) return #s * font_size * window_scale / 2, font_size * window_scale end,
@@ -158,18 +160,21 @@ local imgui = {
         return x >= a[1] and x < b[1] and y >= a[2] and y < b[2]
     end,
     SetMouseCursor = function() end,
-    -- The tooltip window is ImGui's, shared with every addon.
+    -- The tooltip window is ImGui's, shared with every addon. 1.92's says
+    -- whether to draw in it (and end it); 1.81's returns nothing.
     BeginTooltip = function()
+        if input.tip_shut then return false end
         push('EndTooltip')
         f.tooltip = true
+        if version >= 19200 then return true end
     end,
     EndTooltip = function()
         assert(window_scale == 1, 'a font scale left on the tooltip')
         pop('EndTooltip')
         f.tooltip = nil
     end,
-    Text = function(s)
-        printf(s)
+    TextUnformatted = function(s)
+        assert(type(s) == 'string', 'text must be a string')
         if f.tooltip then
             f.tips[#f.tips + 1] = s
             f.tip_px = font_size * window_scale
@@ -386,6 +391,9 @@ eq(fr.ids['XPBar###xpbar_config|##xpbar_close'], true, 'the close mark has its b
 fr = frame({ mx = 420, my = 307 + 60 + 10 })
 eq(fr.tips[1] ~= nil and fr.tips[1]:find('EXP/hr', 1, true) ~= nil, true, 'a label\'s half shows its help')
 eq(fr.tip_px, 15, 'in Segoe 14')
+fr = frame({ mx = 420, my = 307 + 60 + 10, tip_shut = true })
+eq(fr.tips[1], nil, 'a tooltip 1.92 says not to draw is left alone, and not ended')
+eq(said_has('Settings closed after an error'), false, 'and the card carries on')
 
 -- A click lands on release: the fake's click is InvisibleButton returning true.
 frame({ click = '##xpbar_show' })
@@ -454,6 +462,8 @@ eq(text_of(fr, '14px').at[1], value_x, '1.81 measures Segoe at the size drawn, a
 fr = frame({ mx = 420, my = 307 + 60 + 10 })
 eq(fr.tips[1] ~= nil, true, '1.81 shows a label\'s help')
 eq(fr.tip_px, 15, 'in Segoe 14, by the tooltip\'s font scale')
+fr = frame({ mx = 420, my = 307 + 60 + 10, no_scale = true })
+eq(fr.tip_px, 13, 'a face its scale fails on comes off again: ImGui\'s own font, nothing left pushed')
 frame({ click = '##xpbar_size.value' })
 fr = frame({ typed = '24' })
 eq(fr.typed_px, 16, '1.81\'s typed box is Segoe 14.5 too')

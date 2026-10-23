@@ -189,12 +189,16 @@ end
 
 -- Segoe UI at px for ImGui's own widgets, in the window now open. 1.81's
 -- PushFont takes no size: the face goes on at its bake and the window's font
--- scale makes up the rest, until pop_font. False when nothing was pushed.
+-- scale makes up the rest, until pop_font. False when nothing was pushed: a
+-- face that went on without its scale comes off again.
 local function push_font(px)
     if not custom or fonts.text == nil then return false end
     if dynamic then return pcall(imgui.PushFont, fonts.text, px) == true end
     if pcall(imgui.PushFont, fonts.text) ~= true then return false end
-    imgui.SetWindowFontScale(px / BAKE_PX)
+    if pcall(imgui.SetWindowFontScale, px / BAKE_PX) ~= true then
+        imgui.PopFont()
+        return false
+    end
     return true
 end
 
@@ -208,12 +212,12 @@ local function size_of(text, px, which)
     if custom and font ~= nil then
         local pushed = false
         local ok, w, h = pcall(function()
-            -- 1.81 measures the face at its own size and scales it to px,
-            -- as AddText draws it.
+            -- Measured at the size ImGui gives the face (1.81's bake, or any
+            -- window or global scale) and scaled to px, as AddText draws it.
             if dynamic then imgui.PushFont(font, px) else imgui.PushFont(font) end
             pushed = true
             local a, b = imgui.CalcTextSize(text)
-            local base = dynamic and px or tonumber(imgui.GetFontSize()) or 0
+            local base = tonumber(imgui.GetFontSize()) or 0
             imgui.PopFont()
             pushed = false
             local tw, th = read_wh(a, b)
@@ -648,7 +652,8 @@ end
 
 -- Sidekick3's tooltip (kit.tooltip): Segoe 14, popup ground, 9 by 6 padding,
 -- radius 4. The face goes on inside the tooltip, whose own font scale sizes
--- it on 1.81.
+-- it on 1.81. Drawn as is (TextUnformatted: no '%' doubling). 1.92's
+-- BeginTooltip says whether to draw; 1.81's says nothing.
 local function tooltip(str)
     if str == nil or str == '' then return end
     imgui.PushStyleColor(ImGuiCol_PopupBg, rgba(P.popup, 0.97))
@@ -658,12 +663,13 @@ local function tooltip(str)
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, S(4))
     imgui.PushStyleVar(ImGuiStyleVar_PopupRounding, S(4))
     imgui.PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1)
-    local ok, err = pcall(imgui.BeginTooltip)
-    if ok then
+    local ok, open = pcall(imgui.BeginTooltip)
+    local err = open
+    if ok and open ~= false then
         local pushed = false
         ok, err = pcall(function()
             pushed = push_font(S(SMALL + 0.5))
-            imgui.Text((tostring(str):gsub('%%', '%%%%')))
+            imgui.TextUnformatted(tostring(str))
         end)
         if pushed then pop_font() end
         imgui.EndTooltip()

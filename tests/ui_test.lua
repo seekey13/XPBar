@@ -299,6 +299,17 @@ local function text_of(fr, s)
     end
 end
 
+-- The tab's caption, or nil when no tab is drawn: the only text on the background list.
+local function tab_text(fr)
+    for _, d in ipairs(fr.drawn) do
+        if d.list == 'background' and d.call == 'AddText' then
+            local a = d.args
+            if type(a[1]) == 'table' and a[1].file == nil then return a[3] end
+            return a[5]
+        end
+    end
+end
+
 -- The background fill that ends at the screen's bottom from x = 0 and is amber: the bar's fill.
 local function fill_width(fr)
     for _, d in ipairs(fr.drawn) do
@@ -324,11 +335,8 @@ boot(19223)
 -- The tab's text is the pixels asked, 14 by default.
 local fr = frame()
 eq(fill_width(fr), 1280, 'the bar is drawn the first frame, half of 2560')
-local tab = text_of(fr, '0 EXP/hr')
-eq(tab and tab.list, 'background', 'the tab is on the background list')
-eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI the first frame')
-eq(tab and tab.px, 14, 'the tab text is 14 pixels')
-eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'the tab takes no clicks while the card is shut')
+eq(tab_text(fr), nil, 'a rate of 0 hides the tab while the card is shut')
+eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'and nothing takes clicks')
 
 me.exp = 900
 fr = frame(nil, 0.02)
@@ -354,27 +362,39 @@ local function kill(amount)
 end
 kill(200)
 fr = frame()
-eq(text_of(fr, '0 EXP/hr') ~= nil, true, 'one gain is no pace yet')
+eq(tab_text(fr), nil, 'one gain is no pace yet: the tab stays hidden')
 kill(200)
 fr = frame()
-eq(text_of(fr, '0 EXP/hr'), nil, 'a second gain moves the rate')
+-- 200 over the 2 seconds since the first gain.
+local tab = text_of(fr, '360.0k EXP/hr')
+eq(tab and tab.list, 'background', 'a second gain moves the rate and shows the tab, on the background list')
+eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI')
+eq(tab and tab.px, 14, 'the tab text is 14 pixels')
+eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'the tab takes no clicks while the card is shut')
+screen_h = 2160
+fr = frame(nil, 0)
+eq(text_of(fr, '360.0k EXP/hr').px, 14, 'the tab text does not grow with the screen')
+screen_h = 1440
 me.job = 4
 fr = frame()
-eq(text_of(fr, '0 EXP/hr') ~= nil, true, 'a new main job starts the rate over')
-screen_h = 2160
-fr = frame()
-eq(text_of(fr, '0 EXP/hr').px, 14, 'the tab text does not grow with the screen')
-screen_h = 1440
+eq(tab_text(fr), nil, 'a new main job starts the rate over at 0, which hides the tab')
 
 command('/xpb')
 eq(said_has('Settings open'), true, '/xpb opens the card')
 fr = frame()
 eq(fr.windows['XPBar###xpbar_config'], true, 'the card is drawn')
+eq(tab_text(fr), '0 EXP/hr', 'the card shows the tab at 0, so it can be placed')
 eq(fr.windows['XPBar###xpbar_tab_drag'], true, 'the tab takes the pointer while the card is open')
 local title = text_of(fr, 'XPBar')
 eq(title and title.font.file, 'seguisb.ttf', 'the title is Segoe UI Semibold')
 eq(title and title.px, 18, 'the title is 16')
-eq(text_of(fr, 'Show rate').px, 18, 'a label is 16')
+local label = text_of(fr, 'Show rate')
+eq(label.px, 18, 'a label is 16')
+local note = text_of(fr, 'auto-hides when there is no current rate')
+eq(note and note.px, 15, 'Show rate has a note, at 13.5')
+-- The fake measures 'Show rate' at 18px as 81 wide.
+eq(note and note.at[1] > label.at[1] + 81 and note.at[2] > label.at[2], true, 'just after the label')
+local note_x = note and note.at[1]
 eq(text_of(fr, '14px').px, 15, 'a slider value is 14, with its unit')
 -- Right-aligned, so where it starts is its measured width: 1.81 must match it.
 local value_x = text_of(fr, '14px').at[1]
@@ -425,6 +445,7 @@ eq(text_of(fr, '8px') ~= nil, true, 'reset puts it back at 8')
 frame({ click = '##xpbar_close' })
 fr = frame()
 eq(fr.windows['XPBar###xpbar_config'], nil, 'the close mark shuts the card')
+eq(tab_text(fr), nil, 'and a rate of 0 hides the tab again')
 
 -- An error inside the card ends its window, shuts it, and says so once.
 command('/xpb')
@@ -444,16 +465,17 @@ command('/xpb')
 -- 1.81 (Ashita 4.16): Segoe UI baked at 18, drawn at the size asked ---------------
 
 boot(18100)
+-- The card is open so the tab shows at 0.
+command('/xpb')
 fr = frame()
 tab = text_of(fr, '0 EXP/hr')
 eq(tab and tab.font and tab.font.file, 'segoeui.ttf', '1.81 draws the tab in Segoe UI the first frame')
 eq(tab and tab.px, 14, 'at the size asked, not the 18 it is baked at')
-command('/xpb')
-fr = frame()
 title = text_of(fr, 'XPBar')
 eq(title and title.font.file, 'seguisb.ttf', '1.81 titles are Segoe UI Semibold')
 eq(title and title.px, 18, 'at 16')
 eq(text_of(fr, '14px').at[1], value_x, '1.81 measures Segoe at the size drawn, as 1.92 does')
+eq(text_of(fr, 'auto-hides when there is no current rate').at[1], note_x, 'and puts the note where 1.92 does')
 fr = frame({ mx = 420, my = 307 + 60 + 10 })
 eq(fr.tips[1] ~= nil, true, '1.81 shows a label\'s help')
 eq(fr.tip_px, 15, 'in Segoe 14, by the tooltip\'s font scale')
@@ -473,14 +495,14 @@ command('/xpb')
 -- 1.81 without Segoe UI: ImGui's own font, at the size asked ----------------------
 
 boot(18100, false)
+command('/xpb')
 fr = frame()
 tab = text_of(fr, '0 EXP/hr')
 eq(tab and tab.font, 'imgui font', 'without Segoe, 1.81 draws the tab in ImGui\'s font')
 eq(tab and tab.px, 14, 'at the size asked, not ImGui\'s 13')
-command('/xpb')
-fr = frame()
 eq(text_of(fr, 'XPBar').px, 18, 'titles are 16 too')
 eq(text_of(fr, '14px').at[1], value_x, 'and ImGui\'s font is measured at the size drawn')
+eq(text_of(fr, 'auto-hides when there is no current rate').at[1], note_x, 'the note too')
 fr = frame({ mx = 420, my = 307 + 60 + 10 })
 eq(fr.tip_px, 13, 'the tooltip is ImGui\'s own font, unscaled')
 

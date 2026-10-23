@@ -3,7 +3,8 @@ XPBar - experience or merit progress along the bottom of the screen.
 
 A 6px bar from the lower left, the full width of the game window. A small
 tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
-(CP/hr when the bar is capacity points). The bar does not take mouse clicks.
+(CP/hr when the bar is capacity points), and hides while the rate reads 0
+unless /xpb is open. The bar does not take mouse clicks.
 The tab does not either, except while /xpb is open, when it can be
 dragged. The bar is a near-black track at 70% with a 1px near-black edge,
 filled in VanaCore amber at 70%, and the fill eases up to each gain. The
@@ -206,6 +207,7 @@ local function caption_for(p)
     elseif mode == 'capacity' then
         bucket = state.capacity_rate
     end
+    -- The caption, and whether it reads 0.
     return progress.rate_text(mode, progress.per_hour(bucket, os.clock()))
 end
 
@@ -245,7 +247,8 @@ local function drag_tab(x, y, bw, bh, max_x)
     if not ok then error(err or 'drag failed', 0) end
 end
 
-local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points.'
+local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points. It hides while the rate reads 0, except while this card is open.'
+local SHOW_NOTE = 'auto-hides when there is no current rate'
 local SIZE_HELP = 'The tab\'s text size in pixels. The tab grows with it.'
 local POS_HELP = 'Pixels from the left of the screen to the tab. Click the number to type one.'
 
@@ -262,6 +265,7 @@ local function draw_inside(max_x, shown_x)
     end
     -- With the rate off, the tab's rows fade but can still be set.
     local a = cfg.show_rate and 1 or 0.55
+    look.note(dl, g, cy, 'Show rate', SHOW_NOTE, a)
     cy = look.row(dl, g, g.size_y, 'Text size', SIZE_HELP, a)
     local size, sized = look.slider('##xpbar_size', g.slider_x, cy, g.slider_w, cfg.text_size, TEXT_MIN, TEXT_MAX, a, 'px')
     if sized then
@@ -363,12 +367,14 @@ ashita.events.register('d3d_present', 'present_cb', function()
     -- Eased up to each gain; a level or a merit starts it over at once.
     draw(w, h, look.rise('xpbar.fill', frac, 12))
 
-    local text = caption_for(p)
+    local text, zero = caption_for(p)
     local tw = look.tab_size(text, cfg.text_size)
     local max_x = math.max(0, w - (tw or 80))
     local tab
-    -- The switch hides the tab at once, including while the card is open.
-    if cfg.show_rate and tw ~= nil then
+    -- The switch hides the tab at once, including while the card is open. A
+    -- rate that reads 0 hides it too, but not while the card is open, so it
+    -- can still be placed.
+    if cfg.show_rate and tw ~= nil and (preview or not zero) then
         tab = { draw_tab(w, h, text) }
     end
     if preview then

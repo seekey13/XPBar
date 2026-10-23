@@ -663,6 +663,13 @@ function look.hint(dl, x, cy, text, alpha)
     text_mid(dl, x, cy, text, P.faint, alpha, 'text', S(SMALL + 0.5))
 end
 
+-- A short note just after a row's label, smaller and dimmer than the label.
+function look.note(dl, g, cy, label, text, alpha)
+    local lw = measure(label, S(BODY), 'text')
+    if lw == nil then return end
+    text_mid(dl, g.left + lw + S(8), cy, text, P.dim, alpha, 'text', S(SMALL))
+end
+
 function look.dismiss()
     typing = nil
 end

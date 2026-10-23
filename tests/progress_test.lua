@@ -147,6 +147,11 @@ eq(progress.rate_text('exp', 9999.4), '9999 EXP/hr', 'under ten thousand stays w
 eq(progress.rate_text('exp', 9999.6), '10.0k EXP/hr', 'rounding into ten thousand reads in k')
 eq(progress.rate_text('exp', 999949), '999.9k EXP/hr', 'under a million stays in k')
 eq(progress.rate_text('exp', 999960), '1.0m EXP/hr', 'rounding into a million reads in m')
+eq(select(2, progress.rate_text('exp', 0.4)), true, 'under half a point an hour reads 0')
+eq(select(2, progress.rate_text('exp', 0.6)), false, 'half a point an hour reads 1')
+eq(select(2, progress.rate_text('capacity', 0)), true, 'no capacity reads 0')
+eq(select(2, progress.rate_text('limit', 499)), true, 'under 500 limit points an hour reads 0.0 MP/hr')
+eq(select(2, progress.rate_text('limit', 501)), false, 'over it reads 0.1 MP/hr')
 
 local gains = progress.new_state()
 progress.apply(gains, 0x02D, msg(8, 500, 7), 7, 1, 1000)

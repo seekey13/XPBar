@@ -539,15 +539,22 @@ function look.tab_size(text, size)
     return bw, bh
 end
 
--- Amber chip on the bar's top edge: its plate a touch of amber over the
--- well, its text amber. The bottom stays square so it meets the bar.
+-- The chip on the bar's top edge, in the card's colors: its ground, shadow,
+-- edge and hover band, with amber text. The bottom stays square so it meets
+-- the bar.
 function look.paint_tab(dl, x, y, w, h, text, hot, size)
     local px = tab_px(size)
     local radius = math.min(math.floor(4 * px / CHIP_TEXT + 0.5), math.floor(h / 2))
-    local plate = mix(P.well, P.amber, 0.18)
-    fill_top(dl, x - 1, y - 2, w + 2, h + 2, '#000000', radius, 0.30)
-    fill_top(dl, x, y, w, h, plate, radius, 1)
-    if hot then fill_top(dl, x, y, w, h, '#FFFFFF', radius, 0.06) end
+    fill_top(dl, x - 1, y - 2, w + 2, h + 2, '#000000', radius, 0.35)
+    fill_top(dl, x, y, w, h, P.bg, radius, 1)
+    if hot then fill_top(dl, x, y, w, h, P.hover, radius, 0.8) end
+    local col = paint(P.border, 1)
+    local a, b = { x + 0.5, y + 0.5 }, { x + w - 0.5, y + h - 0.5 }
+    if TOP_CORNERS ~= nil then
+        dl:AddRect(a, b, col, radius, TOP_CORNERS, 1)
+    else
+        dl:AddRect(a, b, col, radius)
+    end
     text_centred(dl, x + w / 2, y + h / 2, text, P.amber, 1, 'text', px)
 end
 

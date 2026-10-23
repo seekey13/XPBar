@@ -321,6 +321,17 @@ local function fill_width(fr)
     end
 end
 
+-- Whether `list` has an opaque fill of this color.
+local function filled(fr, list, r, g, b)
+    for _, d in ipairs(fr.drawn) do
+        local c = d.args[3]
+        if d.list == list and d.call == 'AddRectFilled' and c.a == 255 and c.r == r and c.g == g and c.b == b then
+            return true
+        end
+    end
+    return false
+end
+
 local function said_has(s)
     for _, line in ipairs(said) do
         if line:find(s, 1, true) then return true end
@@ -384,6 +395,8 @@ eq(said_has('Settings open'), true, '/xpb opens the card')
 fr = frame()
 eq(fr.windows['XPBar###xpbar_config'], true, 'the card is drawn')
 eq(tab_text(fr), '0 EXP/hr', 'the card shows the tab at 0, so it can be placed')
+eq(filled(fr, 'window', 0x16, 0x18, 0x22) and filled(fr, 'background', 0x16, 0x18, 0x22), true,
+    'the tab\'s ground is the card\'s')
 eq(fr.windows['XPBar###xpbar_tab_drag'], true, 'the tab takes the pointer while the card is open')
 local title = text_of(fr, 'XPBar')
 eq(title and title.font.file, 'seguisb.ttf', 'the title is Segoe UI Semibold')

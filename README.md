@@ -19,7 +19,7 @@ The pace is the points gained since the first of the last 50 gains, over the tim
 
 `/xpb` opens a settings card in the style of VanaCore's `/vana` window by Vekien: show or hide the rate (with a note that it hides itself at 0), the tab's text size, a position slider, and reset. The text size is in pixels: 14 is 14 pixels on any screen, and the tab grows with it. Drag the tab along the bar, or use the slider. Click a slider's number to type one. Hover a label to see what it does. The choice is saved. The bar stays click-through. The tab only takes the pointer while that card is open. Turning the rate off hides the tab immediately, and fades the tab's rows on the card (they can still be set).
 
-The tab is an amber chip on the top edge of the bar. The card is a dark rounded panel with the accent switch and slider. Their text is Segoe UI on Ashita 4.30 and on 4.16, loaded once from Windows' fonts when the addon loads. Without it, text falls back to ImGui's own font.
+The card is a dark rounded panel with the accent switch and slider. The tab is a chip of the same panel on the top edge of the bar, with amber text. Their text is Segoe UI on Ashita 4.30 and on 4.16, loaded once from Windows' fonts when the addon loads. Without it, text falls back to ImGui's own font.
 
 The fill is VanaCore amber, `#E8B45C`, at 70%. The unfilled track is `#0c0c0c` at 70%, with a 1px `#0c0c0c` edge. The fill eases up to each gain, and starts over at once on a level or a merit.
 

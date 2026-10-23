@@ -9,7 +9,8 @@ The tab does not either, except while /xpb is open, when it can be
 dragged. The bar is a near-black track at 70% with a 1px near-black edge,
 filled in VanaCore amber at 70%, and the fill eases up to each gain. The
 rate tab and the settings card are in the style of VanaCore by Vekien
-(look.lua): a dark rounded card, and an amber chip on the bar.
+(look.lua): a dark rounded card, and a chip on the bar in its colors with
+amber text.
 
 Copyright (c) 2026 Seekey
 

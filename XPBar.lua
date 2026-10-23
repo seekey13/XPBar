@@ -5,11 +5,10 @@ A 6px bar from the lower left, the full width of the game window. A small
 tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
 (CP/hr when the bar is capacity points). The bar does not take mouse clicks.
 The tab does not either, except while /xpb is open, when it can be
-dragged. Colors of the bar are Sidekick3's HUD bar with the pointer off the
-panel: the near-black track at 70%, the Vanacore amber fill at 70%, and the
-1px near-black edge. The fill eases up as Sidekick3's bars do. The rate tab
-and the settings card follow Sidekick3's window style (look.lua): a dark
-rounded card, and an amber chip on the bar.
+dragged. The bar is a near-black track at 70% with a 1px near-black edge,
+filled in VanaCore amber at 70%, and the fill eases up to each gain. The
+rate tab and the settings card are in the style of VanaCore by Vekien
+(look.lua): a dark rounded card, and an amber chip on the bar.
 
 Copyright (c) 2026 Seekey
 
@@ -34,15 +33,14 @@ local progress = require('progress')
 local look = require('look')
 
 local BAR_H = 6
--- Sidekick3 ui/window.lua BAR_OFF, the track while the pointer is off the HUD,
--- at BAR_TRACK_A. The gray #808080 track is only while that panel is hovered.
+-- The unfilled track, near-black.
 local TRACK_HEX, TRACK_A = '#0c0c0c', 0.70
--- Vanacore amber, kit.P.amber, the same hex as Sidekick3's MP bar, at BAR_FILL.
+-- VanaCore's amber.
 local FILL_HEX, FILL_A = '#E8B45C', 0.70
--- The 1px edge Sidekick3 draws on every bar (BAR_OFF at BAR_EDGE_A).
+-- The 1px edge around the whole bar.
 local EDGE_HEX, EDGE_A = '#0c0c0c', 0.70
 local DEFAULT_TAB_X = 8
--- The tab's text in pixels, as Sidekick3's HUD "Text font size" is, and its range.
+-- The tab's text size in pixels, and its range.
 local DEFAULT_TEXT = 14
 local TEXT_MIN, TEXT_MAX = 8, 48
 -- Used only when ImGui has not reported a window size yet.
@@ -189,29 +187,16 @@ end
 
 -- The chip on the bar's top edge. Its bottom meets the bar. x is the left
 -- the user chose; the chip slides left if it would pass the right edge.
-local function place_tab(w, h, bw, bh)
-    if bw < 1 then bw = 1 end
-    if bh < 1 then bh = 1 end
-    local max_x = math.max(0, w - bw)
-    local x = cfg.tab_x
-    if x < 0 then x = 0 elseif x > max_x then x = max_x end
-    local y = h - BAR_H - bh
-    return math.floor(x + 0.5), math.floor(y + 0.5), bw, bh, max_x
-end
-
 local function draw_tab(w, h, text)
     local bw, bh = look.tab_size(text, cfg.text_size)
     if bw == nil or h < BAR_H + bh or w < 1 then return nil end
-    -- A new `local bw, bh` here would hide the size just measured and pass nil.
-    local x, y, max_x
-    x, y, bw, bh, max_x = place_tab(w, h, bw, bh)
-    if y < 0 then return nil end
+    local max_x = math.max(0, w - bw)
+    local x, y = math.min(cfg.tab_x, max_x), h - BAR_H - bh
     look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text, config_open and look.over(x, y, bw, bh), cfg.text_size)
     return x, y, bw, bh, max_x
 end
 
 local function caption_for(p)
-    if p == nil then return progress.rate_text('exp', 0) end
     local mode = progress.mode(
         p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked())
@@ -250,7 +235,6 @@ local function drag_tab(x, y, bw, bh, max_x)
     imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, { 0, 0 })
     imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0)
     imgui.PushStyleVar(ImGuiStyleVar_WindowMinSize, { 1, 1 })
-    drag_state[1] = true
     local ok, err = true, nil
     if imgui.Begin('XPBar###xpbar_tab_drag', drag_state, DRAG_FLAGS) then
         ok, err = pcall(drag_inside, x, bw, bh, max_x)
@@ -262,7 +246,7 @@ local function drag_tab(x, y, bw, bh, max_x)
 end
 
 local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points.'
-local SIZE_HELP = 'The tab\'s text in pixels, as Sidekick3\'s HUD text sizes are. The tab grows with it.'
+local SIZE_HELP = 'The tab\'s text size in pixels. The tab grows with it.'
 local POS_HELP = 'Pixels from the left of the screen to the tab. Click the number to type one.'
 
 local function draw_inside(max_x, shown_x)
@@ -276,8 +260,7 @@ local function draw_inside(max_x, shown_x)
         cfg.show_rate = on
         dirty = true
     end
-    -- With the rate off, the tab's rows fade and can still be set, as
-    -- Sidekick3 draws the rows of a section switched off.
+    -- With the rate off, the tab's rows fade but can still be set.
     local a = cfg.show_rate and 1 or 0.55
     cy = look.row(dl, g, g.size_y, 'Text size', SIZE_HELP, a)
     local size, sized = look.slider('##xpbar_size', g.slider_x, cy, g.slider_w, cfg.text_size, TEXT_MIN, TEXT_MAX, a, 'px')
@@ -286,11 +269,8 @@ local function draw_inside(max_x, shown_x)
         dirty = true
     end
     cy = look.row(dl, g, g.pos_y, 'Position', POS_HELP, a)
-    local slider_max = max_x
-    if slider_max < 0 then slider_max = 0 end
-    local shown = shown_x
-    if shown < 0 then shown = 0 elseif shown > slider_max then shown = slider_max end
-    local pos, moved = look.slider('##xpbar_x', g.slider_x, cy, g.slider_w, shown, 0, slider_max, a, 'px')
+    local shown = math.min(shown_x, max_x)
+    local pos, moved = look.slider('##xpbar_x', g.slider_x, cy, g.slider_w, shown, 0, max_x, a, 'px')
     if moved then
         cfg.tab_x = clamp_num(pos, 0, max_x, cfg.tab_x)
         dirty = true
@@ -380,7 +360,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
         p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
-    -- Eased up at Sidekick3's bar speed; a level or a merit starts it over at once.
+    -- Eased up to each gain; a level or a merit starts it over at once.
     draw(w, h, look.rise('xpbar.fill', frac, 12))
 
     local text = caption_for(p)
@@ -392,12 +372,10 @@ ashita.events.register('d3d_present', 'present_cb', function()
         tab = { draw_tab(w, h, text) }
     end
     if preview then
-        local shown_x = cfg.tab_x
-        if shown_x < 0 then shown_x = 0 elseif shown_x > max_x then shown_x = max_x end
         if tab ~= nil and tab[1] ~= nil then
             draw_settings(tab, tab[5], tab[1])
         else
-            draw_settings(nil, max_x, shown_x)
+            draw_settings(nil, max_x, cfg.tab_x)
         end
     else
         look.dismiss()

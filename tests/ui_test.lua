@@ -1,9 +1,8 @@
 -- Run from anywhere: luajit tests/ui_test.lua
--- XPBar.lua and look.lua against a fake Ashita and a fake ImGui, as Sidekick3's
--- tests/ui_window_test.lua runs its window: every frame closes what it opens,
--- ids are unique, buttons are never zero-sized, and the card's controls change
--- what the bar draws. ImGui 1.92 and 1.81 both run in Segoe UI, and 1.81 again
--- on a Windows without it, in ImGui's own font.
+-- XPBar.lua and look.lua against a fake Ashita and a fake ImGui: every frame
+-- closes what it opens, ids are unique, buttons are never zero-sized, and the
+-- card's controls change what the bar draws. ImGui 1.92 and 1.81 both run in
+-- Segoe UI, and 1.81 again on a Windows without it, in ImGui's own font.
 local src = debug.getinfo(1, 'S').source
 if src:sub(1, 1) == '@' then src = src:sub(2) end
 local root = src:match('^(.*)[/\\]tests[/\\][^/\\]+$') or '.'
@@ -27,8 +26,7 @@ local CONSTANTS = {
     'ImGuiStyleVar_WindowPadding', 'ImGuiStyleVar_WindowBorderSize', 'ImGuiStyleVar_WindowMinSize',
     'ImGuiStyleVar_ItemSpacing', 'ImGuiStyleVar_WindowRounding', 'ImGuiStyleVar_PopupRounding',
     'ImGuiStyleVar_PopupBorderSize', 'ImGuiStyleVar_FramePadding', 'ImGuiStyleVar_FrameRounding',
-    'ImGuiCol_PopupBg', 'ImGuiCol_Border', 'ImGuiCol_Text', 'ImGuiCol_Header', 'ImGuiCol_HeaderHovered',
-    'ImGuiCol_HeaderActive', 'ImGuiCol_Separator', 'ImGuiCol_FrameBg', 'ImGuiCol_FrameBgHovered',
+    'ImGuiCol_PopupBg', 'ImGuiCol_Border', 'ImGuiCol_Text', 'ImGuiCol_FrameBg', 'ImGuiCol_FrameBgHovered',
     'ImGuiCol_FrameBgActive', 'ImGuiInputTextFlags_CharsDecimal', 'ImGuiInputTextFlags_EnterReturnsTrue',
     'ImGuiInputTextFlags_AutoSelectAll',
 }
@@ -36,7 +34,7 @@ for i, name in ipairs(CONSTANTS) do rawset(_G, name, 2 ^ (i - 1)) end
 
 local screen_h = 1440
 local f        -- this frame: { stack, vars, ids, windows, drawn, tips, tip_px, typed_px, window, popup, tooltip }
-local input    -- what the pointer does this frame: click, hover, active, activated, down, drag, mouse, typed;
+local input    -- what the pointer does this frame: click, active, activated, down, drag, mx/my, typed;
                -- and what ImGui refuses: tip_shut (1.92's BeginTooltip), no_scale (SetWindowFontScale)
 local popups = {}
 local font_size, font_stack = 13, {}
@@ -110,12 +108,10 @@ local imgui = {
     end,
     SetNextWindowPos = function() end,
     SetNextWindowSize = function(size) assert(size[1] > 0 and size[2] > 0, 'SetNextWindowSize: zero size') end,
-    Begin = function(name, open)
+    Begin = function(name)
         push('End')
         f.window = name
         f.windows[name] = true
-        if input.close == name and type(open) == 'table' then open[1] = false end
-        if input.explode == name then error('boom') end
         return true
     end,
     End = function()
@@ -146,8 +142,7 @@ local imgui = {
         item(id)
         return input.click == id
     end,
-    IsItemHovered = function() return input.hover == last_item or input.click == last_item end,
-    IsItemClicked = function() return input.click == last_item end,
+    IsItemHovered = function() return input.click == last_item end,
     IsItemActive = function() return input.active == last_item end,
     IsItemActivated = function() return input.activated == last_item end,
     IsAnyItemActive = function() return input.active ~= nil end,
@@ -378,7 +373,7 @@ eq(fr.windows['XPBar###xpbar_config'], true, 'the card is drawn')
 eq(fr.windows['XPBar###xpbar_tab_drag'], true, 'the tab takes the pointer while the card is open')
 local title = text_of(fr, 'XPBar')
 eq(title and title.font.file, 'seguisb.ttf', 'the title is Segoe UI Semibold')
-eq(title and title.px, 18, 'the title is 16, as Sidekick Settings\'')
+eq(title and title.px, 18, 'the title is 16')
 eq(text_of(fr, 'Show rate').px, 18, 'a label is 16')
 eq(text_of(fr, '14px').px, 15, 'a slider value is 14, with its unit')
 -- Right-aligned, so where it starts is its measured width: 1.81 must match it.

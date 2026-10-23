@@ -22,7 +22,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 addon.name     = 'XPBar'
 addon.author   = 'Seekey'
-addon.version  = '1.3.0'
+addon.version  = '1.4.0'
 addon.desc     = 'XP and merit progress along the bottom of the screen, with an EXP/hr or MP/hr tab.'
 addon.commands = { '/xpb' }
 
@@ -343,9 +343,14 @@ local function save_if_idle()
     if ok then dirty = false end
 end
 
+-- Segoe UI, once, outside a frame: the only time the font atlas may be added to.
+ashita.events.register('load', 'load_cb', function()
+    look.load_fonts()
+end)
+
 ashita.events.register('d3d_present', 'present_cb', function()
     local w, h = screen()
-    local ready = look.begin_frame(h)
+    look.begin_frame(h)
     local p = player()
     if p ~= nil then
         progress.job_rates(state, p:GetMainJob())
@@ -362,7 +367,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
 
     local preview = config_open
     if p == nil then
-        if preview and ready then
+        if preview then
             draw_settings(nil, math.max(0, w - 80), cfg.tab_x)
         else
             look.dismiss()
@@ -377,11 +382,6 @@ ashita.events.register('d3d_present', 'present_cb', function()
         state.limit, state.capacity)
     -- Eased up at Sidekick3's bar speed; a level or a merit starts it over at once.
     draw(w, h, look.rise('xpbar.fill', frac, 12))
-
-    if not ready then
-        save_if_idle()
-        return
-    end
 
     local text = caption_for(p)
     local tw = look.tab_size(text, cfg.text_size)

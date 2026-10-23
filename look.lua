@@ -9,7 +9,8 @@ title bar with the name in semibold 16 and Sidekick3's close mark, 30px rows
 with a hover band, 180px sliders, and values and buttons at 14. The card's
 sizes scale with the screen height. The tab's text is the pixels asked, as
 Sidekick3's HUD text is. The experience bar itself is drawn by XPBar and
-stays a fixed 6px.
+stays a fixed 6px. Text is Segoe UI on 1.92 and on 1.81 (Ashita 4.16), baked
+once when the addon loads, as Chains and UberMap bake theirs.
 
 Based on Sidekick3's ui/kit.lua, which is based on VanaCore's
 addons/vanacore/vana/draw.lua, Copyright (C) 2026 Vekien (GPL-3.0-or-later).
@@ -53,6 +54,8 @@ local BODY, SMALL = 16, 13.5
 local TITLE_H, ROW_H, LEFT, PAD = 44, 30, 24, 18
 local SW_W, SW_H, SLIDER_W = 32, 17, 180
 local CARD_W = 360
+-- The size Segoe UI is baked at. 1.92 draws it at any size; 1.81 scales this.
+local BAKE_PX = 18
 
 -- 1.92 rounds with ImDrawFlags. 1.81 rounds with ImDrawCornerFlags. Missing
 -- means every corner, which is what a radius does when no flags are passed.
@@ -63,8 +66,6 @@ local anim, last, dt = {}, nil, 0
 local fonts = {}
 local custom = false
 local broken = false
-local fonts_loaded = false
-local pending_fonts = nil
 local dynamic = (tonumber(IMGUI_VERSION_NUM) or 0) >= 19200
 local cache, cache_n = {}, 0
 local style_depth = 0
@@ -132,7 +133,7 @@ local function read_wh(a, b)
     return w, h
 end
 
--- Segoe UI once it is in; ImGui's own font until then, and always on 1.81.
+-- Segoe UI when Windows has it; ImGui's own font when it doesn't.
 -- nil once drawing with a face has failed: then text is ImGui's font at its
 -- own size, with no size asked of it.
 local function face(which)
@@ -154,7 +155,7 @@ local function load_faces()
         local handle = io.open(path, 'rb')
         if handle == nil then return nil end
         handle:close()
-        local ok, font = pcall(imgui.AddFontFromFileTTF, path, 18)
+        local ok, font = pcall(imgui.AddFontFromFileTTF, path, BAKE_PX)
         if ok and font then return font end
         return nil
     end
@@ -163,34 +164,47 @@ local function load_faces()
     return { text = text, semi = add('seguisb.ttf') or text }
 end
 
--- True when text may be drawn. The frame a font is added draws none of it:
--- ImGui cannot use a font in the frame it was created.
+-- From the load event only, outside any frame. The atlas is shared with every
+-- addon, and adding to it from d3d_present is an access violation on 1.81.
+function look.load_fonts()
+    local ok, added = pcall(load_faces)
+    if ok and type(added) == 'table' then
+        fonts = added
+        custom = true
+        clear_cache()
+    end
+end
+
 function look.begin_frame(screen_h)
     local now = os.clock()
     dt = last and math.max(0, math.min(0.1, now - last)) or 0
     last = now
     set_scale(screen_h)
-    if pending_fonts ~= nil then
-        fonts = pending_fonts
-        pending_fonts = nil
-        custom = true
-        clear_cache()
-        return true
-    end
     if not custom then
         local ok, font = pcall(imgui.GetFont)
         fonts.text = ok and font or nil
         fonts.semi = nil
     end
-    if not fonts_loaded and dynamic then
-        fonts_loaded = true
-        local ok, added = pcall(load_faces)
-        if ok and type(added) == 'table' then
-            pending_fonts = added
-            return false
-        end
+end
+
+-- Segoe UI at px for ImGui's own widgets, in the window now open. 1.81's
+-- PushFont takes no size: the face goes on at its bake and the window's font
+-- scale makes up the rest, until pop_font. False when nothing was pushed: a
+-- face that went on without its scale comes off again.
+local function push_font(px)
+    if not custom or fonts.text == nil then return false end
+    if dynamic then return pcall(imgui.PushFont, fonts.text, px) == true end
+    if pcall(imgui.PushFont, fonts.text) ~= true then return false end
+    if pcall(imgui.SetWindowFontScale, px / BAKE_PX) ~= true then
+        imgui.PopFont()
+        return false
     end
     return true
+end
+
+local function pop_font()
+    if not dynamic then imgui.SetWindowFontScale(1) end
+    imgui.PopFont()
 end
 
 local function size_of(text, px, which)
@@ -198,12 +212,17 @@ local function size_of(text, px, which)
     if custom and font ~= nil then
         local pushed = false
         local ok, w, h = pcall(function()
-            imgui.PushFont(font, px)
+            -- Measured at the size ImGui gives the face (1.81's bake, or any
+            -- window or global scale) and scaled to px, as AddText draws it.
+            if dynamic then imgui.PushFont(font, px) else imgui.PushFont(font) end
             pushed = true
             local a, b = imgui.CalcTextSize(text)
+            local base = tonumber(imgui.GetFontSize()) or 0
             imgui.PopFont()
             pushed = false
-            return read_wh(a, b)
+            local tw, th = read_wh(a, b)
+            if tw == nil or base <= 0 then return nil end
+            return tw * px / base, th * px / base
         end)
         if pushed then pcall(imgui.PopFont) end
         if ok and w ~= nil then return w, h end
@@ -419,9 +438,7 @@ local function take_typed(id, min, max)
                 imgui.SetKeyboardFocusHere()
                 typing.focus = false
             end
-            if custom and fonts.text ~= nil then
-                pushed = pcall(imgui.PushFont, fonts.text, S(SMALL + 1)) == true
-            end
+            pushed = push_font(S(SMALL + 1))
             imgui.PushItemWidth(S(90))
             local submitted = imgui.InputText('##xpbar_typed', typing.text, 16, type_flags())
             imgui.PopItemWidth()
@@ -430,7 +447,7 @@ local function take_typed(id, min, max)
             imgui.CloseCurrentPopup()
             return tonumber(typing.text[1])
         end)
-        if pushed then imgui.PopFont() end
+        if pushed then pop_font() end
         imgui.EndPopup()
         if not inner_ok then error(value, 0) end
         return value
@@ -634,7 +651,9 @@ function look.card(dl, wx, wy)
 end
 
 -- Sidekick3's tooltip (kit.tooltip): Segoe 14, popup ground, 9 by 6 padding,
--- radius 4.
+-- radius 4. The face goes on inside the tooltip, whose own font scale sizes
+-- it on 1.81. Drawn as is (TextUnformatted: no '%' doubling). 1.92's
+-- BeginTooltip says whether to draw; 1.81's says nothing.
 local function tooltip(str)
     if str == nil or str == '' then return end
     imgui.PushStyleColor(ImGuiCol_PopupBg, rgba(P.popup, 0.97))
@@ -644,12 +663,17 @@ local function tooltip(str)
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, S(4))
     imgui.PushStyleVar(ImGuiStyleVar_PopupRounding, S(4))
     imgui.PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1)
-    local pushed = false
-    if custom and fonts.text ~= nil then
-        pushed = pcall(imgui.PushFont, fonts.text, S(SMALL + 0.5)) == true
+    local ok, open = pcall(imgui.BeginTooltip)
+    local err = open
+    if ok and open ~= false then
+        local pushed = false
+        ok, err = pcall(function()
+            pushed = push_font(S(SMALL + 0.5))
+            imgui.TextUnformatted(tostring(str))
+        end)
+        if pushed then pop_font() end
+        imgui.EndTooltip()
     end
-    local ok, err = pcall(imgui.SetTooltip, (tostring(str):gsub('%%', '%%%%')))
-    if pushed then imgui.PopFont() end
     imgui.PopStyleVar(4)
     imgui.PopStyleColor(3)
     if not ok then error(err, 0) end

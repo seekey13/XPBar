@@ -2,7 +2,8 @@
 -- XPBar.lua and look.lua against a fake Ashita and a fake ImGui, as Sidekick3's
 -- tests/ui_window_test.lua runs its window: every frame closes what it opens,
 -- ids are unique, buttons are never zero-sized, and the card's controls change
--- what the bar draws. ImGui 1.92 (Segoe UI) and 1.81 (ImGui's own font) both run.
+-- what the bar draws. ImGui 1.92 and 1.81 both run in Segoe UI, and 1.81 again
+-- on a Windows without it, in ImGui's own font.
 local src = debug.getinfo(1, 'S').source
 if src:sub(1, 1) == '@' then src = src:sub(2) end
 local root = src:match('^(.*)[/\\]tests[/\\][^/\\]+$') or '.'
@@ -34,10 +35,14 @@ local CONSTANTS = {
 for i, name in ipairs(CONSTANTS) do rawset(_G, name, 2 ^ (i - 1)) end
 
 local screen_h = 1440
-local f        -- this frame: { stack, vars, ids, windows, drawn, tips, window, popup }
-local input    -- what the pointer does this frame: click, hover, active, activated, down, drag, mouse, typed
+local f        -- this frame: { stack, vars, ids, windows, drawn, tips, tip_px, typed_px, window, popup, tooltip }
+local input    -- what the pointer does this frame: click, hover, active, activated, down, drag, mouse, typed;
+               -- and what ImGui refuses: tip_shut (1.92's BeginTooltip), no_scale (SetWindowFontScale)
 local popups = {}
 local font_size, font_stack = 13, {}
+local window_scale = 1  -- SetWindowFontScale on the window now open
+local version = 0       -- IMGUI_VERSION_NUM of this boot
+local in_frame = false  -- inside d3d_present
 local last_item
 
 local function push(closer) f.stack[#f.stack + 1] = closer end
@@ -79,19 +84,30 @@ local imgui = {
         return WINDOW
     end,
     GetFont = function() return 'imgui font' end,
-    GetFontSize = function() return font_size end,
+    GetFontSize = function() return font_size * window_scale end,
+    -- 1.92 takes a size. 1.81 takes none: a face is its bake.
     PushFont = function(font, px)
         assert(font ~= nil, 'PushFont: no font')
+        assert(version >= 19200 or px == nil, 'PushFont: 1.81 takes no size')
         font_stack[#font_stack + 1] = font_size
-        font_size = px or font_size
+        font_size = px or (type(font) == 'table' and font.px) or font_size
         push('PopFont')
     end,
     PopFont = function()
         font_size = table.remove(font_stack)
         pop('PopFont')
     end,
-    CalcTextSize = function(s) return #s * font_size / 2, font_size end,
-    AddFontFromFileTTF = function(path) return { file = path:match('[^\\/]+$') } end,
+    SetWindowFontScale = function(k)
+        assert(f.window or f.popup or f.tooltip, 'SetWindowFontScale outside a window')
+        if input.no_scale then error('no font scale') end
+        window_scale = k
+    end,
+    CalcTextSize = function(s) return #s * font_size * window_scale / 2, font_size * window_scale end,
+    -- The atlas is shared: adding to it during a frame is a crash on 1.81.
+    AddFontFromFileTTF = function(path, px)
+        assert(not in_frame, 'AddFontFromFileTTF during a frame')
+        return { file = path:match('[^\\/]+$'), px = px }
+    end,
     SetNextWindowPos = function() end,
     SetNextWindowSize = function(size) assert(size[1] > 0 and size[2] > 0, 'SetNextWindowSize: zero size') end,
     Begin = function(name, open)
@@ -103,6 +119,7 @@ local imgui = {
         return true
     end,
     End = function()
+        assert(window_scale == 1, 'a font scale left on ' .. tostring(f.window))
         pop('End')
         f.window = nil
     end,
@@ -143,9 +160,25 @@ local imgui = {
         return x >= a[1] and x < b[1] and y >= a[2] and y < b[2]
     end,
     SetMouseCursor = function() end,
-    SetTooltip = function(s)
-        printf(s)
-        f.tips[#f.tips + 1] = s
+    -- The tooltip window is ImGui's, shared with every addon. 1.92's says
+    -- whether to draw in it (and end it); 1.81's returns nothing.
+    BeginTooltip = function()
+        if input.tip_shut then return false end
+        push('EndTooltip')
+        f.tooltip = true
+        if version >= 19200 then return true end
+    end,
+    EndTooltip = function()
+        assert(window_scale == 1, 'a font scale left on the tooltip')
+        pop('EndTooltip')
+        f.tooltip = nil
+    end,
+    TextUnformatted = function(s)
+        assert(type(s) == 'string', 'text must be a string')
+        if f.tooltip then
+            f.tips[#f.tips + 1] = s
+            f.tip_px = font_size * window_scale
+        end
     end,
     TextDisabled = function(s) printf(s) end,
     OpenPopup = function(id) popups[id] = true end,
@@ -156,6 +189,7 @@ local imgui = {
         return true
     end,
     EndPopup = function()
+        assert(window_scale == 1, 'a font scale left on ' .. tostring(f.popup))
         pop('EndPopup')
         f.popup = nil
     end,
@@ -164,6 +198,7 @@ local imgui = {
     InputText = function(id, buf)
         assert(type(buf) == 'table' and type(buf[1]) == 'string', id .. ': value must be { string }')
         item(id)
+        f.typed_px = font_size * window_scale
         if input.typed == nil then return false end
         buf[1] = input.typed
         return true
@@ -219,14 +254,17 @@ rawset(_G, 'print', function(s) said[#said + 1] = s end)
 local now = 1000
 os.clock = function() return now end  -- luacheck: ignore 122
 
--- Segoe UI is "there" whatever machine this runs on.
+-- Segoe UI is "there" whatever machine this runs on, unless a boot says not.
+local segoe = true
 local real_open = io.open
 io.open = function(path, mode)  -- luacheck: ignore 122
-    if tostring(path):match('%.ttf$') then return { close = function() end } end
+    if tostring(path):match('%.ttf$') then return segoe and { close = function() end } or nil end
     return real_open(path, mode)
 end
 
-local function boot(version)
+-- Loads XPBar as Ashita does: the file, then its load event, outside any frame.
+local function boot(v, has_segoe)
+    version, segoe = v, has_segoe ~= false
     package.loaded['look'], package.loaded['progress'] = nil, nil
     rawset(_G, 'IMGUI_VERSION_NUM', version)
     rawset(_G, 'ImDrawFlags_RoundCornersTop', version >= 19200 and 48 or nil)
@@ -234,13 +272,16 @@ local function boot(version)
     rawset(_G, 'addon', {})
     handlers, said, popups, me = {}, {}, {}, { login = 2, exp = 500, job = 1 }
     dofile(root .. '/XPBar.lua')
+    handlers.load()
 end
 
 local function frame(what, step)
     input = what or {}
     f = { stack = {}, vars = 0, ids = {}, windows = {}, drawn = {}, tips = {} }
     now = now + (step or 1)
+    in_frame = true
     local ok, err = pcall(handlers.d3d_present)
+    in_frame = false
     eq(ok, true, 'frame raised: ' .. tostring(err))
     eq(f.stack[#f.stack], nil, 'every scope is closed')
     eq(f.vars, 0, 'every style var is popped')
@@ -249,15 +290,15 @@ end
 
 local function command(text) handlers.command({ command = text }) end
 
--- The AddText call that drew `s`: { list, font, px, col }.
+-- The AddText call that drew `s`: { list, font, px, at, col }.
 local function text_of(fr, s)
     for _, d in ipairs(fr.drawn) do
         if d.call == 'AddText' then
             local a = d.args
             if type(a[1]) == 'table' and a[1].file == nil and a[3] == s then
-                return { list = d.list, col = a[2] }
+                return { list = d.list, at = a[1], col = a[2] }
             elseif a[5] == s then
-                return { list = d.list, font = a[1], px = a[2], col = a[4] }
+                return { list = d.list, font = a[1], px = a[2], at = a[3], col = a[4] }
             end
         end
     end
@@ -287,12 +328,10 @@ boot(19223)
 -- 1440 tall is a scale of 1.1 for the card: S(14) = 15, S(16) = 18, S(19) = 21.
 -- The tab's text is the pixels asked, 14 by default.
 local fr = frame()
-eq(text_of(fr, '0 EXP/hr'), nil, 'the frame Segoe UI is added draws no text')
 eq(fill_width(fr), 1280, 'the bar is drawn the first frame, half of 2560')
-fr = frame()
 local tab = text_of(fr, '0 EXP/hr')
 eq(tab and tab.list, 'background', 'the tab is on the background list')
-eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI')
+eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI the first frame')
 eq(tab and tab.px, 14, 'the tab text is 14 pixels')
 eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'the tab takes no clicks while the card is shut')
 
@@ -342,6 +381,8 @@ eq(title and title.font.file, 'seguisb.ttf', 'the title is Segoe UI Semibold')
 eq(title and title.px, 18, 'the title is 16, as Sidekick Settings\'')
 eq(text_of(fr, 'Show rate').px, 18, 'a label is 16')
 eq(text_of(fr, '14px').px, 15, 'a slider value is 14, with its unit')
+-- Right-aligned, so where it starts is its measured width: 1.81 must match it.
+local value_x = text_of(fr, '14px').at[1]
 eq(text_of(fr, 'Reset position').px, 15, 'a button is 14')
 eq(text_of(fr, 'Drag the tab along the bar.').px, 15, 'the hint is 14')
 eq(fr.ids['XPBar###xpbar_config|##xpbar_close'], true, 'the close mark has its button')
@@ -349,6 +390,10 @@ eq(fr.ids['XPBar###xpbar_config|##xpbar_close'], true, 'the close mark has its b
 -- The card is at 400, 300 with a 7px margin: rows start 48 + 1 + 11 under its top.
 fr = frame({ mx = 420, my = 307 + 60 + 10 })
 eq(fr.tips[1] ~= nil and fr.tips[1]:find('EXP/hr', 1, true) ~= nil, true, 'a label\'s half shows its help')
+eq(fr.tip_px, 15, 'in Segoe 14')
+fr = frame({ mx = 420, my = 307 + 60 + 10, tip_shut = true })
+eq(fr.tips[1], nil, 'a tooltip 1.92 says not to draw is left alone, and not ended')
+eq(said_has('Settings closed after an error'), false, 'and the card carries on')
 
 -- A click lands on release: the fake's click is InvisibleButton returning true.
 frame({ click = '##xpbar_show' })
@@ -360,7 +405,8 @@ fr = frame()
 eq(text_of(fr, 'Text size').col.a, 255, 'and come back with it on')
 
 frame({ click = '##xpbar_size.value' })
-frame({ typed = '20' })
+fr = frame({ typed = '20' })
+eq(fr.typed_px, 16, 'the typed box is Segoe 14.5')
 fr = frame()
 eq(text_of(fr, '20px') ~= nil, true, 'a typed size shows on its slider')
 local px
@@ -400,24 +446,48 @@ eq(fill_width(fr), nil, 'no bar while logged out')
 eq(fr.windows['XPBar###xpbar_config'], true, 'the card opens logged out too')
 command('/xpb')
 
--- 1.81: ImGui's own font, at the size asked --------------------------------------
+-- 1.81 (Ashita 4.16): Segoe UI baked at 18, drawn at the size asked ---------------
 
-boot(18000)
+boot(18100)
 fr = frame()
 tab = text_of(fr, '0 EXP/hr')
-eq(tab and tab.font, 'imgui font', '1.81 draws the tab in ImGui\'s font the first frame')
-eq(tab and tab.px, 14, 'at the size asked, not ImGui\'s 13')
+eq(tab and tab.font and tab.font.file, 'segoeui.ttf', '1.81 draws the tab in Segoe UI the first frame')
+eq(tab and tab.px, 14, 'at the size asked, not the 18 it is baked at')
 command('/xpb')
 fr = frame()
-eq(text_of(fr, 'XPBar').px, 18, '1.81 titles are 16 too')
+title = text_of(fr, 'XPBar')
+eq(title and title.font.file, 'seguisb.ttf', '1.81 titles are Segoe UI Semibold')
+eq(title and title.px, 18, 'at 16')
+eq(text_of(fr, '14px').at[1], value_x, '1.81 measures Segoe at the size drawn, as 1.92 does')
+fr = frame({ mx = 420, my = 307 + 60 + 10 })
+eq(fr.tips[1] ~= nil, true, '1.81 shows a label\'s help')
+eq(fr.tip_px, 15, 'in Segoe 14, by the tooltip\'s font scale')
+fr = frame({ mx = 420, my = 307 + 60 + 10, no_scale = true })
+eq(fr.tip_px, 13, 'a face its scale fails on comes off again: ImGui\'s own font, nothing left pushed')
 frame({ click = '##xpbar_size.value' })
-frame({ typed = '24' })
+fr = frame({ typed = '24' })
+eq(fr.typed_px, 16, '1.81\'s typed box is Segoe 14.5 too')
 fr = frame()
 px = nil
 for _, d in ipairs(fr.drawn) do
     if d.list == 'background' and d.call == 'AddText' then px = d.args[2] end
 end
 eq(px, 24, '1.81 text size works: 24 pixels')
+command('/xpb')
+
+-- 1.81 without Segoe UI: ImGui's own font, at the size asked ----------------------
+
+boot(18100, false)
+fr = frame()
+tab = text_of(fr, '0 EXP/hr')
+eq(tab and tab.font, 'imgui font', 'without Segoe, 1.81 draws the tab in ImGui\'s font')
+eq(tab and tab.px, 14, 'at the size asked, not ImGui\'s 13')
+command('/xpb')
+fr = frame()
+eq(text_of(fr, 'XPBar').px, 18, 'titles are 16 too')
+eq(text_of(fr, '14px').at[1], value_x, 'and ImGui\'s font is measured at the size drawn')
+fr = frame({ mx = 420, my = 307 + 60 + 10 })
+eq(fr.tip_px, 13, 'the tooltip is ImGui\'s own font, unscaled')
 
 if failed > 0 then
     io.stderr:write(failed .. ' failed\n')

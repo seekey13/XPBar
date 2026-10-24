@@ -164,15 +164,18 @@ local function abbrev(n)
     return string.format('%d', math.floor(n + 0.5))
 end
 
--- The tab caption. Merits are limit points / 10000, shown to a tenth.
+-- The tab caption, and true when its number reads zero. Merits are limit
+-- points / 10000, shown to a tenth.
 function progress.rate_text(mode, per_hour)
     per_hour = num(per_hour)
     if per_hour < 0 then per_hour = 0 end
     if mode == 'limit' then
-        return string.format('%.1f MP/hr', per_hour / progress.LIMIT_MAX)
+        local merits = string.format('%.1f', per_hour / progress.LIMIT_MAX)
+        return merits .. ' MP/hr', merits == '0.0'
     end
     local unit = mode == 'capacity' and 'CP' or 'EXP'
-    return abbrev(per_hour) .. ' ' .. unit .. '/hr'
+    local n = abbrev(per_hour)
+    return n .. ' ' .. unit .. '/hr', n == '0'
 end
 
 -- A gain that finishes the bar starts the next one with the remainder.

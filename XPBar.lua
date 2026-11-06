@@ -7,10 +7,12 @@ tab on its top edge shows EXP/hr while leveling and MP/hr on the merit bar
 unless /xpb is open. The bar does not take mouse clicks.
 The tab does not either, except while /xpb is open, when it can be
 dragged. The bar is a near-black track at 70% with a 1px near-black edge,
-filled in VanaCore amber at 70%, and the fill eases up to each gain. The
-rate tab and the settings card are in the style of VanaCore by Vekien
-(look.lua): a dark rounded card, and a chip on the bar in its colors with
-amber text.
+filled in VanaCore amber at 70%, and the fill eases up to each gain.
+Without Dedication (status 249) it glows red, as TargetBar's bar does
+locked on: a red frame on its edge, softer a few pixels above it. It
+pulses, fading to a quarter and back every 1.6 seconds. The rate tab and
+the settings card are in the style of VanaCore by Vekien (look.lua): a
+dark rounded card, and a chip on the bar in its colors with amber text.
 
 Copyright (c) 2026 Seekey
 
@@ -59,6 +61,23 @@ end
 local TRACK = col(TRACK_HEX, TRACK_A)
 local FILL = col(FILL_HEX, FILL_A)
 local EDGE = col(EDGE_HEX, EDGE_A)
+
+-- Dedication, the EXP bonus status. Without it the bar glows red.
+local DEDICATION = 249
+-- TargetBar's lock-on frame: its red, as the bar's own rect grown a pixel at a
+-- time, fainter each step out. The last step is on the bar's edge.
+local GLOW_HEX = '#FF4A40'
+local GLOW = {
+    { 4, 0.14 },
+    { 3, 0.22 },
+    { 2, 0.34 },
+    { 1, 0.50 },
+    { 0, 0.72 },
+}
+-- The glow pulses: it lights at full, fades to GLOW_LOW of that and comes
+-- back, once every GLOW_PERIOD seconds.
+local GLOW_PERIOD, GLOW_LOW = 1.6, 0.25
+local glow_since = nil
 
 local defaults = T{
     tab_x = DEFAULT_TAB_X,
@@ -137,6 +156,29 @@ local function player()
     return p
 end
 
+-- False while Dedication is off. A buff list that cannot be read counts as
+-- on, so a failed read does not light the bar.
+local function dedicated(p)
+    local ok, buffs = pcall(function() return p:GetBuffs() end)
+    if not ok or type(buffs) ~= 'table' then return true end
+    for _, id in pairs(buffs) do
+        if id == DEDICATION then return true end
+    end
+    return false
+end
+
+-- How strong the glow is now, 0 when it is off. The pulse starts at full
+-- each time the glow lights, so it is seen the moment Dedication drops.
+local function glow_level(on, now)
+    if not on then
+        glow_since = nil
+        return 0
+    end
+    if glow_since == nil or now < glow_since then glow_since = now end
+    local wave = 0.5 + 0.5 * math.cos(2 * math.pi * (now - glow_since) / GLOW_PERIOD)
+    return GLOW_LOW + (1 - GLOW_LOW) * wave
+end
+
 local function server_id()
     if GetPlayerEntity == nil then return nil end
     local ok, ent = pcall(GetPlayerEntity)
@@ -175,7 +217,10 @@ end
 -- end would leave the lower left corner empty. The 1px stroke is inset by
 -- half a pixel so it stays inside the 6px instead of being clipped in half
 -- along the bottom of the screen.
-local function draw(w, h, frac)
+-- `glow` (0 to 1, how far into the pulse) draws the red frame on the edge
+-- after it. The bar is flush with three sides of the screen, so only the
+-- fringe above it shows past the edge. The tab goes on after, over it.
+local function draw(w, h, frac, glow)
     if h < BAR_H or w < 1 then return end
     local dl = imgui.GetBackgroundDrawList()
     local x, y = 0, h - BAR_H
@@ -185,6 +230,11 @@ local function draw(w, h, frac)
         dl:AddRectFilled({ x, y }, { x + fw, y + BAR_H }, FILL, 0)
     end
     dl:AddRect({ x + 0.5, y + 0.5 }, { x + w - 0.5, y + BAR_H - 0.5 }, EDGE, 0)
+    if glow <= 0 then return end
+    for _, step in ipairs(GLOW) do
+        local e = step[1]
+        dl:AddRect({ x - e + 0.5, y - e + 0.5 }, { x + w + e - 0.5, y + BAR_H + e - 0.5 }, col(GLOW_HEX, step[2] * glow), 0)
+    end
 end
 
 -- The chip on the bar's top edge. Its bottom meets the bar. x is the left
@@ -366,7 +416,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
     -- Eased up to each gain; a level or a merit starts it over at once.
-    draw(w, h, look.rise('xpbar.fill', frac, 12))
+    draw(w, h, look.rise('xpbar.fill', frac, 12), glow_level(not dedicated(p), os.clock()))
 
     local text, zero = caption_for(p)
     local tw = look.tab_size(text, cfg.text_size)

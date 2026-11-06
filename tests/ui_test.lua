@@ -238,6 +238,10 @@ local player = {
     GetIsExperiencePointsLocked = function() return false end,
     GetLimitPoints = function() return 0 end,
     GetCapacityPoints = function() return 0 end,
+    GetBuffs = function()
+        if me.buffs == 'error' then error('no buffs') end
+        return me.buffs
+    end,
 }
 rawset(_G, 'AshitaCore', { GetMemoryManager = function() return { GetPlayer = function() return player end } end })
 rawset(_G, 'ashita', { events = { register = function(event, _, fn) handlers[event] = fn end } })
@@ -265,7 +269,8 @@ local function boot(v, has_segoe)
     rawset(_G, 'ImDrawFlags_RoundCornersTop', version >= 19200 and 48 or nil)
     rawset(_G, 'ImDrawCornerFlags_Top', version < 19200 and 3 or nil)
     rawset(_G, 'addon', {})
-    handlers, said, popups, me = {}, {}, {}, { login = 2, exp = 500, job = 1 }
+    -- Dedication (249) is on unless a test takes it off.
+    handlers, said, popups, me = {}, {}, {}, { login = 2, exp = 500, job = 1, buffs = { 249, 255 } }
     dofile(root .. '/XPBar.lua')
     handlers.load()
 end
@@ -332,6 +337,29 @@ local function filled(fr, list, r, g, b)
     return false
 end
 
+-- The red glow's strokes, in draw order: { at, to, a, index into drawn }.
+local function glow(fr)
+    local out = {}
+    for i, d in ipairs(fr.drawn) do
+        local c = d.args[3]
+        if d.list == 'background' and d.call == 'AddRect' and c.r == 0xFF and c.g == 0x4A and c.b == 0x40 then
+            out[#out + 1] = { at = d.args[1], to = d.args[2], a = c.a, i = i }
+        end
+    end
+    return out
+end
+
+-- Where in the draw order the tab's ground is filled on the background list.
+local function tab_ground(fr)
+    for i, d in ipairs(fr.drawn) do
+        local c = d.args[3]
+        if d.list == 'background' and d.call == 'AddRectFilled' and c.a == 255
+            and c.r == 0x16 and c.g == 0x18 and c.b == 0x22 then
+            return i
+        end
+    end
+end
+
 local function said_has(s)
     for _, line in ipairs(said) do
         if line:find(s, 1, true) then return true end
@@ -382,10 +410,47 @@ eq(tab and tab.list, 'background', 'a second gain moves the rate and shows the t
 eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI')
 eq(tab and tab.px, 14, 'the tab text is 14 pixels')
 eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'the tab takes no clicks while the card is shut')
+eq(#glow(fr), 0, 'with Dedication on, the bar does not glow')
+
+-- Without Dedication: TargetBar's lock frame, 4px out down to the bar's edge.
+me.buffs = { 1, 33, 255 }
+fr = frame(nil, 0)
+local strokes = glow(fr)
+eq(#strokes, 5, 'without Dedication the bar glows: five strokes')
+eq(strokes[1] and strokes[1].at[2], 1440 - 6 - 4 + 0.5, 'the outermost is 4px above the bar')
+eq(strokes[1] and strokes[1].a, 36, 'and faint, at 0.14')
+eq(strokes[5] and strokes[5].at[2], 1440 - 6 + 0.5, 'the last is on the bar\'s own edge')
+eq(strokes[5] and strokes[5].to[1], 2560 - 0.5, 'across the full width')
+eq(strokes[5] and strokes[5].a, 184, 'and strongest, at 0.72')
+local ground = tab_ground(fr)
+eq(ground ~= nil and strokes[5] ~= nil and strokes[5].i < ground, true, 'the tab is drawn over the glow')
+eq(text_of(fr, '360.0k EXP/hr') ~= nil, true, 'and the tab still shows')
+me.buffs = {}
+eq(#glow(frame(nil, 0)), 5, 'no buffs at all is no Dedication')
+me.buffs = 'error'
+eq(#glow(frame(nil, 0)), 0, 'a buff list that cannot be read does not light the bar')
+me.buffs = { 255, 249 }
+eq(#glow(frame(nil, 0)), 0, 'Dedication back on puts the glow out')
 screen_h = 2160
 fr = frame(nil, 0)
 eq(text_of(fr, '360.0k EXP/hr').px, 14, 'the tab text does not grow with the screen')
 screen_h = 1440
+
+-- The pulse: full when it lights, a quarter half a period (0.8s) on, full a period on.
+local function edge_a(at) local s = glow(at)[5] return s and s.a end
+me.buffs = {}
+eq(edge_a(frame(nil, 0)), 184, 'the glow lights at full')
+fr = frame(nil, 0.8)
+eq(edge_a(fr), 46, 'half a period on, the pulse is at its low: a quarter of 0.72')
+eq(glow(fr)[1] and glow(fr)[1].a, 9, 'the fringe fades with it')
+eq(#glow(fr), 5, 'all five strokes still draw at the low')
+eq(edge_a(frame(nil, 0.4)), 115, 'on its way back up')
+eq(edge_a(frame(nil, 0.4)), 184, 'and back at full a period on')
+me.buffs = { 249 }
+frame(nil, 0)
+me.buffs = {}
+eq(edge_a(frame(nil, 0.8)), 184, 'put out and lit again, it starts over at full')
+me.buffs = { 249 }
 me.job = 4
 fr = frame()
 eq(tab_text(fr), nil, 'a new main job starts the rate over at 0, which hides the tab')
@@ -472,6 +537,8 @@ me.login = 0
 command('/xpb')
 fr = frame()
 eq(fill_width(fr), nil, 'no bar while logged out')
+me.buffs = {}
+eq(#glow(frame()), 0, 'and no glow logged out, Dedication or not')
 eq(fr.windows['XPBar###xpbar_config'], true, 'the card opens logged out too')
 command('/xpb')
 

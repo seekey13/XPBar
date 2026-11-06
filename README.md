@@ -23,7 +23,9 @@ The card is a dark rounded panel with the accent switch and slider. The tab is a
 
 The fill is VanaCore amber, `#E8B45C`, at 70%. The unfilled track is `#0c0c0c` at 70%, with a 1px `#0c0c0c` edge. The fill eases up to each gain, and starts over at once on a level or a merit.
 
-Without Dedication (status 249) the bar glows red, the way TargetBar's bar does when locked on: a `#FF4A40` frame on the bar's edge at 72%, then fainter a pixel at a time out to 4px above the bar. The bar sits against the left, right and bottom of the screen, so the glow shows along its top. The tab is drawn over it. The glow pulses: it lights at full, fades to a quarter of that and comes back, once every 1.6 seconds. It goes out as soon as Dedication is back on, and starts at full again the next time it lights. A buff list that cannot be read does not light it.
+Without Dedication (status 249) the bar glows red, the way TargetBar's bar does when locked on: a `#FF4A40` frame on the bar's edge at 72%, then fainter a pixel at a time out to 4px above the bar. The bar sits against the left, right and bottom of the screen, so the glow shows along its top. The glow pulses: it lights at full, fades to a quarter of that and comes back, once every 1.6 seconds. It goes out as soon as Dedication is back on, and starts at full again the next time it lights. A buff list that cannot be read does not light it.
+
+While Dedication is missing, the tab says `No Dedication` in `#FFB4B4` (TargetBar's "Locked"), then the rate in amber, as in `No Dedication  360.0k EXP/hr`. It glows and pulses with the bar: the same frame around its top and sides, its bottom on the bar's top edge. The rate keeps its own rules: it hides while it reads 0 (except while `/xpb` is open) and when it is switched off. The warning does not: then the tab is `No Dedication` alone. It sits where the tab is placed. When Dedication is back, the warning and the glow go and the rate stays.
 
 What fills it is the same choice HXUI's exp bar makes:
 
@@ -40,7 +42,7 @@ luajit tests/progress_test.lua
 luajit tests/ui_test.lua
 ```
 
-The first checks the bar's arithmetic, the packets and the rate. The second draws the bar, its Dedication glow, the tab and the card through a fake ImGui, on 1.92 and on 1.81 (with Segoe UI and without), and fails on a Lua error or an ImGui scope left open (either would stop the game), or on a font added to ImGui's shared atlas during a frame.
+The first checks the bar's arithmetic, the packets and the rate. The second draws the bar, the tab, their Dedication glow and warning, and the card through a fake ImGui, on 1.92 and on 1.81 (with Segoe UI and without), and fails on a Lua error or an ImGui scope left open (either would stop the game), or on a font added to ImGui's shared atlas during a frame.
 
 ## Licence
 

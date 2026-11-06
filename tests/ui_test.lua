@@ -338,16 +338,20 @@ local function filled(fr, list, r, g, b)
 end
 
 -- The red glow's strokes, in draw order: { at, to, a, index into drawn }.
-local function glow(fr)
+-- The bar's reach the screen's bottom edge. The tab's stop at the bar's top.
+local function red_strokes(fr, on_bar)
     local out = {}
     for i, d in ipairs(fr.drawn) do
         local c = d.args[3]
-        if d.list == 'background' and d.call == 'AddRect' and c.r == 0xFF and c.g == 0x4A and c.b == 0x40 then
+        if d.list == 'background' and d.call == 'AddRect' and c.r == 0xFF and c.g == 0x4A and c.b == 0x40
+            and (d.args[2][2] > screen_h - 6) == on_bar then
             out[#out + 1] = { at = d.args[1], to = d.args[2], a = c.a, i = i }
         end
     end
     return out
 end
+local function glow(fr) return red_strokes(fr, true) end
+local function tab_glow(fr) return red_strokes(fr, false) end
 
 -- Where in the draw order the tab's ground is filled on the background list.
 local function tab_ground(fr)
@@ -411,6 +415,8 @@ eq(tab and tab.font and tab.font.file, 'segoeui.ttf', 'the tab is Segoe UI')
 eq(tab and tab.px, 14, 'the tab text is 14 pixels')
 eq(fr.windows['XPBar###xpbar_tab_drag'], nil, 'the tab takes no clicks while the card is shut')
 eq(#glow(fr), 0, 'with Dedication on, the bar does not glow')
+eq(#tab_glow(fr), 0, 'nor the tab')
+eq(text_of(fr, '360.0k EXP/hr').col.r, 0xE8, 'and the rate is amber')
 
 -- Without Dedication: TargetBar's lock frame, 4px out down to the bar's edge.
 me.buffs = { 1, 33, 255 }
@@ -423,14 +429,44 @@ eq(strokes[5] and strokes[5].at[2], 1440 - 6 + 0.5, 'the last is on the bar\'s o
 eq(strokes[5] and strokes[5].to[1], 2560 - 0.5, 'across the full width')
 eq(strokes[5] and strokes[5].a, 184, 'and strongest, at 0.72')
 local ground = tab_ground(fr)
-eq(ground ~= nil and strokes[5] ~= nil and strokes[5].i < ground, true, 'the tab is drawn over the glow')
-eq(text_of(fr, '360.0k EXP/hr') ~= nil, true, 'and the tab still shows')
+eq(ground ~= nil and strokes[5] ~= nil and strokes[5].i < ground, true, 'the tab is drawn over the bar\'s glow')
+
+-- The tab is the warning, and glows with the bar. The fake's 14px chip is 22 tall.
+local warning = text_of(fr, 'No Dedication')
+eq(warning and warning.list, 'background', 'the tab says No Dedication')
+eq(warning and warning.col.r == 0xFF and warning.col.g == 0xB4 and warning.col.b == 0xB4, true,
+    'in TargetBar\'s Locked pink')
+local rate = text_of(fr, '360.0k EXP/hr')
+eq(rate and rate.list, 'background', 'and still the rate')
+eq(rate and rate.col.r, 0xE8, 'in amber')
+-- The fake measures 'No Dedication' at 14px as 91 wide. The gap is 8 at 13px: 9 at 14.
+eq(rate and warning and rate.at[1] - warning.at[1], 91 + 9, 'after the warning, a gap on')
+-- The line is 191 wide, the chip 206: the pair starts 7.5 in from the tab at 8, drawn at 16.
+eq(warning and warning.at[1], 16, 'the pair is centred in the tab')
+local chip = tab_glow(fr)
+local chip_y = 1440 - 6 - 22
+eq(#chip, 5, 'the tab glows too: five strokes')
+eq(chip[1] and chip[1].at[1], 8 - 4 + 0.5, 'the outermost 4px left of the tab')
+eq(chip[1] and chip[1].at[2], chip_y - 4 + 0.5, 'and 4px above it')
+eq(chip[1] and chip[1].to[2], chip_y + 22 - 0.5, 'its bottom on the bar\'s top edge')
+eq(chip[1] and chip[1].a, 36, 'faint, as the bar\'s is')
+eq(chip[5] and chip[5].at[2], chip_y + 0.5, 'the last on the tab\'s own edge')
+eq(chip[5] and chip[5].a, 184, 'at 0.72')
+eq(chip[4] and ground and chip[4].i < ground, true, 'the fringe goes under the tab\'s ground')
+eq(chip[5] and ground and chip[5].i > ground, true, 'and the edge over it')
 me.buffs = {}
-eq(#glow(frame(nil, 0)), 5, 'no buffs at all is no Dedication')
+fr = frame(nil, 0)
+eq(#glow(fr), 5, 'no buffs at all is no Dedication')
+eq(text_of(fr, 'No Dedication') ~= nil, true, 'and says so')
 me.buffs = 'error'
-eq(#glow(frame(nil, 0)), 0, 'a buff list that cannot be read does not light the bar')
+fr = frame(nil, 0)
+eq(#glow(fr), 0, 'a buff list that cannot be read does not light the bar')
+eq(text_of(fr, 'No Dedication'), nil, 'and puts no warning on the tab')
 me.buffs = { 255, 249 }
-eq(#glow(frame(nil, 0)), 0, 'Dedication back on puts the glow out')
+fr = frame(nil, 0)
+eq(#glow(fr) + #tab_glow(fr), 0, 'Dedication back on puts the glow out')
+eq(text_of(fr, 'No Dedication'), nil, 'and takes the warning off the tab')
+eq(text_of(fr, '360.0k EXP/hr') ~= nil, true, 'leaving the rate')
 screen_h = 2160
 fr = frame(nil, 0)
 eq(text_of(fr, '360.0k EXP/hr').px, 14, 'the tab text does not grow with the screen')
@@ -444,6 +480,7 @@ fr = frame(nil, 0.8)
 eq(edge_a(fr), 46, 'half a period on, the pulse is at its low: a quarter of 0.72')
 eq(glow(fr)[1] and glow(fr)[1].a, 9, 'the fringe fades with it')
 eq(#glow(fr), 5, 'all five strokes still draw at the low')
+eq(tab_glow(fr)[5] and tab_glow(fr)[5].a, 46, 'the tab pulses with the bar')
 eq(edge_a(frame(nil, 0.4)), 115, 'on its way back up')
 eq(edge_a(frame(nil, 0.4)), 184, 'and back at full a period on')
 me.buffs = { 249 }
@@ -454,6 +491,14 @@ me.buffs = { 249 }
 me.job = 4
 fr = frame()
 eq(tab_text(fr), nil, 'a new main job starts the rate over at 0, which hides the tab')
+me.buffs = {}
+fr = frame()
+eq(tab_text(fr), 'No Dedication', 'a rate of 0 does not hide the warning')
+eq(text_of(fr, '0 EXP/hr'), nil, 'only the rate')
+eq(#tab_glow(fr), 5, 'and the warning glows')
+me.buffs = { 249 }
+fr = frame()
+eq(tab_text(fr), nil, 'with Dedication back, the rate of 0 hides the tab again')
 
 command('/xpb')
 eq(said_has('Settings open'), true, '/xpb opens the card')
@@ -493,9 +538,20 @@ frame({ click = '##xpbar_show' })
 fr = frame()
 eq(text_of(fr, '0 EXP/hr') == nil and fr.windows['XPBar###xpbar_tab_drag'], nil, 'the switch hides the tab')
 eq(text_of(fr, 'Text size').col.a, 140, 'the tab\'s rows fade to 0.55 with it off')
+me.buffs = {}
+fr = frame()
+eq(tab_text(fr), 'No Dedication', 'the switch does not hide the warning')
+eq(text_of(fr, '0 EXP/hr'), nil, 'only the rate, card open or not')
+eq(fr.windows['XPBar###xpbar_tab_drag'], true, 'and the warning can be dragged')
+me.buffs = { 249 }
 frame({ click = '##xpbar_show' })
 fr = frame()
 eq(text_of(fr, 'Text size').col.a, 255, 'and come back with it on')
+me.buffs = {}
+fr = frame()
+eq(text_of(fr, 'No Dedication') ~= nil and text_of(fr, '0 EXP/hr') ~= nil, true,
+    'the card open shows the rate at 0 after the warning, so the whole tab can be placed')
+me.buffs = { 249 }
 
 frame({ click = '##xpbar_size.value' })
 fr = frame({ typed = '20' })

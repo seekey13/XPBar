@@ -3,8 +3,9 @@ The rate tab and the /xpb settings card, in the style of VanaCore's /vana
 window by Vekien: an empty ImGui window, and every control painted on a draw
 list over an invisible button. The card's sizes scale with the screen
 height. The tab's text is the pixels asked. The experience bar itself is
-drawn by XPBar.lua. Text is Segoe UI on 1.92 and on 1.81 (Ashita 4.16),
-baked once when the addon loads.
+drawn by XPBar.lua, but its red glow, and the tab's, are TargetBar's
+lock-on frame from here (look.glow). Text is Segoe UI on 1.92 and on 1.81
+(Ashita 4.16), baked once when the addon loads.
 
 Based on VanaCore's addons/vanacore/vana/draw.lua, Copyright (C) 2026 Vekien
 (GPL-3.0-or-later). XPBar is GPL-3.0-or-later too (LICENSE); VanaCore's name
@@ -38,6 +39,20 @@ local P = {
     knob = '#F2F3F8',
     off = '#2B2F42',
 }
+
+-- TargetBar's lock-on frame, for the bar and the tab while Dedication is off:
+-- its red, as the shape grown a pixel at a time, fainter each step out. The
+-- last step is on the shape's own edge. TargetBar's "Locked" is WARN_TEXT,
+-- and so is the tab's warning.
+local GLOW_HEX = '#FF4A40'
+local GLOW = {
+    { 4, 0.14 },
+    { 3, 0.22 },
+    { 2, 0.34 },
+    { 1, 0.50 },
+    { 0, 0.72 },
+}
+local WARN_TEXT = '#FFB4B4'
 
 -- Sizes, unscaled: VanaCore's two text sizes, and the card's title bar, row,
 -- margins, switch and slider.
@@ -294,6 +309,16 @@ local function outline(dl, x, y, w, h, hex, radius, alpha)
     dl:AddRect({ x, y }, { x + w, y + h }, paint(hex, alpha), radius)
 end
 
+-- A 1px stroke inside the box, rounded at the top only.
+local function outline_top(dl, x, y, w, h, col, radius)
+    local a, b = { x + 0.5, y + 0.5 }, { x + w - 0.5, y + h - 0.5 }
+    if TOP_CORNERS ~= nil then
+        dl:AddRect(a, b, col, radius, TOP_CORNERS, 1)
+    else
+        dl:AddRect(a, b, col, radius)
+    end
+end
+
 local function circle(dl, cx, cy, r, hex, alpha)
     dl:AddCircleFilled({ cx, cy }, r, paint(hex, alpha), 24)
 end
@@ -529,33 +554,79 @@ local function tab_px(size)
     return px
 end
 
-function look.tab_size(text, size)
+-- The tab's line: `warn` in WARN_TEXT, then `text` in amber, SPLIT apart at
+-- 13px (it grows with the text). Either can be nil. Returns the line's width
+-- and height, the warning's width, and the gap; nil with nothing to draw.
+local SPLIT = 8
+
+local function tab_line(text, warn, px)
+    local ww, wh, tw, th = 0, 0, 0, 0
+    if warn ~= nil then
+        ww, wh = measure(warn, px, 'text')
+        if ww == nil then return nil end
+    end
+    if text ~= nil then
+        tw, th = measure(text, px, 'text')
+        if tw == nil then return nil end
+    end
+    if warn == nil and text == nil then return nil end
+    local gap = (warn ~= nil and text ~= nil) and math.floor(SPLIT * px / CHIP_TEXT + 0.5) or 0
+    return ww + gap + tw, math.max(wh, th), ww, gap
+end
+
+function look.tab_size(text, size, warn)
     local px = tab_px(size)
     local k = px / CHIP_TEXT
-    local tw, th = measure(text, px, 'text')
-    if tw == nil then return nil end
-    local bw = math.max(math.floor(30 * k + 0.5), math.floor(tw + 14 * k + 0.5))
-    local bh = math.max(math.floor(20 * k + 0.5), math.floor(th + 6 * k + 0.5))
+    local lw, lh = tab_line(text, warn, px)
+    if lw == nil then return nil end
+    local bw = math.max(math.floor(30 * k + 0.5), math.floor(lw + 14 * k + 0.5))
+    local bh = math.max(math.floor(20 * k + 0.5), math.floor(lh + 6 * k + 0.5))
     return bw, bh
 end
 
+-- The glow's strokes at `level` (0 to 1, how far into the pulse), from the
+-- outside in: { pixels out from the edge, color }.
+function look.glow(level)
+    local out = {}
+    for i, step in ipairs(GLOW) do
+        out[i] = { step[1], paint(GLOW_HEX, step[2] * level) }
+    end
+    return out
+end
+
 -- The chip on the bar's top edge, in the card's colors: its ground, shadow,
--- edge and hover band, with amber text. The bottom stays square so it meets
--- the bar.
-function look.paint_tab(dl, x, y, w, h, text, hot, size)
+-- edge and hover band, with amber text, after `warn` in WARN_TEXT when given
+-- (see tab_line). The bottom stays square so it meets the bar. `glow`, from
+-- look.glow, frames it as the bar is framed. The frame grows up and out, its
+-- bottom on the bar's top edge. The steps past the edge go under the ground,
+-- so only what is outside the chip shows. The step on the edge goes over the
+-- border.
+function look.paint_tab(dl, x, y, w, h, text, hot, size, glow, warn)
     local px = tab_px(size)
     local radius = math.min(math.floor(4 * px / CHIP_TEXT + 0.5), math.floor(h / 2))
     fill_top(dl, x - 1, y - 2, w + 2, h + 2, '#000000', radius, 0.35)
+    if glow ~= nil then
+        for _, s in ipairs(glow) do
+            local e = s[1]
+            if e > 0 then
+                local r = math.min(radius + e, math.floor((h + e) / 2), math.floor((w + e * 2) / 2))
+                outline_top(dl, x - e, y - e, w + e * 2, h + e, s[2], r)
+            end
+        end
+    end
     fill_top(dl, x, y, w, h, P.bg, radius, 1)
     if hot then fill_top(dl, x, y, w, h, P.hover, radius, 0.8) end
-    local col = paint(P.border, 1)
-    local a, b = { x + 0.5, y + 0.5 }, { x + w - 0.5, y + h - 0.5 }
-    if TOP_CORNERS ~= nil then
-        dl:AddRect(a, b, col, radius, TOP_CORNERS, 1)
-    else
-        dl:AddRect(a, b, col, radius)
+    outline_top(dl, x, y, w, h, paint(P.border, 1), radius)
+    if glow ~= nil then
+        for _, s in ipairs(glow) do
+            if s[1] == 0 then outline_top(dl, x, y, w, h, s[2], radius) end
+        end
     end
-    text_centred(dl, x + w / 2, y + h / 2, text, P.amber, 1, 'text', px)
+    local lw, _, ww, gap = tab_line(text, warn, px)
+    if lw == nil then return end
+    local left, cy = x + (w - lw) / 2, y + h / 2
+    if warn ~= nil then text_mid(dl, left, cy, warn, WARN_TEXT, 1, 'text', px) end
+    if text ~= nil then text_mid(dl, left + ww + gap, cy, text, P.amber, 1, 'text', px) end
 end
 
 -- The card from the top: the title bar and its line, 10 more, three rows, the

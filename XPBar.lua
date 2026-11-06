@@ -10,9 +10,12 @@ dragged. The bar is a near-black track at 70% with a 1px near-black edge,
 filled in VanaCore amber at 70%, and the fill eases up to each gain.
 Without Dedication (status 249) it glows red, as TargetBar's bar does
 locked on: a red frame on its edge, softer a few pixels above it. It
-pulses, fading to a quarter and back every 1.6 seconds. The rate tab and
-the settings card are in the style of VanaCore by Vekien (look.lua): a
-dark rounded card, and a chip on the bar in its colors with amber text.
+pulses, fading to a quarter and back every 1.6 seconds. The tab then says
+"No Dedication" in TargetBar's "Locked" pink, then the rate as ever, and
+glows with the bar. A rate of 0 or the switch off hides only the rate: the
+warning stays. The rate tab and the settings card are in the style of
+VanaCore by Vekien (look.lua): a dark rounded card, and a chip on the bar
+in its colors with amber text.
 
 Copyright (c) 2026 Seekey
 
@@ -62,18 +65,10 @@ local TRACK = col(TRACK_HEX, TRACK_A)
 local FILL = col(FILL_HEX, FILL_A)
 local EDGE = col(EDGE_HEX, EDGE_A)
 
--- Dedication, the EXP bonus status. Without it the bar glows red.
+-- Dedication, the EXP bonus status. Without it the bar and the tab glow red
+-- (look.glow), and the tab says WARNING before the rate.
 local DEDICATION = 249
--- TargetBar's lock-on frame: its red, as the bar's own rect grown a pixel at a
--- time, fainter each step out. The last step is on the bar's edge.
-local GLOW_HEX = '#FF4A40'
-local GLOW = {
-    { 4, 0.14 },
-    { 3, 0.22 },
-    { 2, 0.34 },
-    { 1, 0.50 },
-    { 0, 0.72 },
-}
+local WARNING = 'No Dedication'
 -- The glow pulses: it lights at full, fades to GLOW_LOW of that and comes
 -- back, once every GLOW_PERIOD seconds.
 local GLOW_PERIOD, GLOW_LOW = 1.6, 0.25
@@ -217,9 +212,9 @@ end
 -- end would leave the lower left corner empty. The 1px stroke is inset by
 -- half a pixel so it stays inside the 6px instead of being clipped in half
 -- along the bottom of the screen.
--- `glow` (0 to 1, how far into the pulse) draws the red frame on the edge
--- after it. The bar is flush with three sides of the screen, so only the
--- fringe above it shows past the edge. The tab goes on after, over it.
+-- `glow`, from look.glow, draws the red frame on the edge after it. The bar
+-- is flush with three sides of the screen, so only the fringe above it
+-- shows past the edge. The tab goes on after, over it.
 local function draw(w, h, frac, glow)
     if h < BAR_H or w < 1 then return end
     local dl = imgui.GetBackgroundDrawList()
@@ -230,21 +225,24 @@ local function draw(w, h, frac, glow)
         dl:AddRectFilled({ x, y }, { x + fw, y + BAR_H }, FILL, 0)
     end
     dl:AddRect({ x + 0.5, y + 0.5 }, { x + w - 0.5, y + BAR_H - 0.5 }, EDGE, 0)
-    if glow <= 0 then return end
-    for _, step in ipairs(GLOW) do
-        local e = step[1]
-        dl:AddRect({ x - e + 0.5, y - e + 0.5 }, { x + w + e - 0.5, y + BAR_H + e - 0.5 }, col(GLOW_HEX, step[2] * glow), 0)
+    if glow == nil then return end
+    for _, s in ipairs(glow) do
+        local e = s[1]
+        dl:AddRect({ x - e + 0.5, y - e + 0.5 }, { x + w + e - 0.5, y + BAR_H + e - 0.5 }, s[2], 0)
     end
 end
 
 -- The chip on the bar's top edge. Its bottom meets the bar. x is the left
 -- the user chose; the chip slides left if it would pass the right edge.
-local function draw_tab(w, h, text)
-    local bw, bh = look.tab_size(text, cfg.text_size)
+-- `text` is the rate, `warn` the warning before it; either can be nil.
+-- `glow` is the bar's, so the two pulse together.
+local function draw_tab(w, h, text, warn, glow)
+    local bw, bh = look.tab_size(text, cfg.text_size, warn)
     if bw == nil or h < BAR_H + bh or w < 1 then return nil end
     local max_x = math.max(0, w - bw)
     local x, y = math.min(cfg.tab_x, max_x), h - BAR_H - bh
-    look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text, config_open and look.over(x, y, bw, bh), cfg.text_size)
+    look.paint_tab(imgui.GetBackgroundDrawList(), x, y, bw, bh, text,
+        config_open and look.over(x, y, bw, bh), cfg.text_size, glow, warn)
     return x, y, bw, bh, max_x
 end
 
@@ -298,7 +296,7 @@ local function drag_tab(x, y, bw, bh, max_x)
     if not ok then error(err or 'drag failed', 0) end
 end
 
-local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points. It hides while the rate reads 0, except while this card is open.'
+local SHOW_HELP = 'The tab on the bar: EXP/hr while leveling, MP/hr on the merit bar, CP/hr on capacity points. It hides while the rate reads 0, except while this card is open. Without Dedication it says No Dedication before the rate, even with this off.'
 local SHOW_NOTE = 'auto-hides when there is no current rate'
 local SIZE_HELP = 'The tab\'s text size in pixels. The tab grows with it.'
 local POS_HELP = 'Pixels from the left of the screen to the tab. Click the number to type one.'
@@ -416,17 +414,23 @@ ashita.events.register('d3d_present', 'present_cb', function()
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
     -- Eased up to each gain; a level or a merit starts it over at once.
-    draw(w, h, look.rise('xpbar.fill', frac, 12), glow_level(not dedicated(p), os.clock()))
+    local level = glow_level(not dedicated(p), os.clock())
+    local glow = level > 0 and look.glow(level) or nil
+    draw(w, h, look.rise('xpbar.fill', frac, 12), glow)
 
     local text, zero = caption_for(p)
     local tw = look.tab_size(text, cfg.text_size)
     local max_x = math.max(0, w - (tw or 80))
-    local tab
-    -- The switch hides the tab at once, including while the card is open. A
+    -- The switch hides the rate at once, including while the card is open. A
     -- rate that reads 0 hides it too, but not while the card is open, so it
-    -- can still be placed.
-    if cfg.show_rate and tw ~= nil and (preview or not zero) then
-        tab = { draw_tab(w, h, text) }
+    -- can still be placed. Neither hides the warning, which goes before the
+    -- rate without Dedication, or stands alone when the rate is hidden.
+    local rate = text
+    if not cfg.show_rate or (zero and not preview) then rate = nil end
+    local warn = glow ~= nil and WARNING or nil
+    local tab
+    if rate ~= nil or warn ~= nil then
+        tab = { draw_tab(w, h, rate, warn, glow) }
     end
     if preview then
         if tab ~= nil and tab[1] ~= nil then

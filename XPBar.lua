@@ -174,6 +174,17 @@ local function glow_level(on, now)
     return GLOW_LOW + (1 - GLOW_LOW) * wave
 end
 
+-- The main job's own level, which picks the bar. Under Level Sync,
+-- GetMainJobLevel is the level the sync holds you to, but a 75 in limit mode
+-- still earns limit points, and experience still counts toward the job's own
+-- level. A level that cannot be read falls back to GetMainJobLevel.
+local function job_level(p)
+    local ok, lv = pcall(function() return p:GetJobLevel(p:GetMainJob()) end)
+    lv = ok and tonumber(lv) or 0
+    if lv > 0 then return lv end
+    return p:GetMainJobLevel()
+end
+
 local function server_id()
     if GetPlayerEntity == nil then return nil end
     local ok, ent = pcall(GetPlayerEntity)
@@ -248,7 +259,7 @@ end
 
 local function caption_for(p)
     local mode = progress.mode(
-        p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
+        job_level(p), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked())
     local bucket = state.exp_rate
     if mode == 'limit' then
@@ -410,7 +421,7 @@ ashita.events.register('d3d_present', 'present_cb', function()
     end
 
     local frac = progress.fraction(
-        p:GetMainJobLevel(), p:GetExpCurrent(), p:GetExpNeeded(),
+        job_level(p), p:GetExpCurrent(), p:GetExpNeeded(),
         p:GetIsLimitModeEnabled(), p:GetIsExperiencePointsLocked(),
         state.limit, state.capacity)
     -- Eased up to each gain; a level or a merit starts it over at once.

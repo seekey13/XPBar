@@ -33,6 +33,8 @@ What fills it is the same choice HXUI's exp bar makes:
 - Limit points, out of 10000, in limit mode, when experience is locked at level 75 or higher, or when experience sits at the 55999 cap.
 - Capacity points, out of 30000, at level 99 unless limit mode is on. CatsEyeXI's cap is 75, so that path stays unused there.
 
+The level is the main job's own, not the one Level Sync holds you to. A 75 in limit mode synced down to 30 still earns limit points, so it keeps the limit point bar and `MP/hr`.
+
 Limit and capacity points are read from the client when the addon loads and after a zone, then updated from the kill message and replaced when the character update arrives. The rate is kept from those gain lines and is not reset by a zone. A new main job starts it over.
 
 ## Tests

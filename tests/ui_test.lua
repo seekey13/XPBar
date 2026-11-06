@@ -231,12 +231,18 @@ local player = {
     GetLoginStatus = function() return me.login end,
     GetIsZoning = function() return 0 end,
     GetMainJob = function() return me.job end,
-    GetMainJobLevel = function() return 50 end,
+    -- The level a Level Sync holds you to, or the job's own level without one.
+    GetMainJobLevel = function() return me.sync or me.level end,
+    GetJobLevel = function(_, job)
+        if me.no_job_level then return 0 end
+        if job == me.job then return me.level end
+        return 1
+    end,
     GetExpCurrent = function() return me.exp end,
     GetExpNeeded = function() return 1000 end,
-    GetIsLimitModeEnabled = function() return false end,
-    GetIsExperiencePointsLocked = function() return false end,
-    GetLimitPoints = function() return 0 end,
+    GetIsLimitModeEnabled = function() return me.limit_mode end,
+    GetIsExperiencePointsLocked = function() return me.locked end,
+    GetLimitPoints = function() return me.limit end,
     GetCapacityPoints = function() return 0 end,
     GetBuffs = function()
         if me.buffs == 'error' then error('no buffs') end
@@ -269,8 +275,10 @@ local function boot(v, has_segoe)
     rawset(_G, 'ImDrawFlags_RoundCornersTop', version >= 19200 and 48 or nil)
     rawset(_G, 'ImDrawCornerFlags_Top', version < 19200 and 3 or nil)
     rawset(_G, 'addon', {})
-    -- Dedication (249) is on unless a test takes it off.
-    handlers, said, popups, me = {}, {}, {}, { login = 2, exp = 500, job = 1, buffs = { 249, 255 } }
+    -- Dedication (249) is on unless a test takes it off. Level 50, leveling.
+    handlers, said, popups = {}, {}, {}
+    me = { login = 2, level = 50, exp = 500, job = 1, buffs = { 249, 255 },
+        limit_mode = false, locked = false, limit = 0 }
     dofile(root .. '/XPBar.lua')
     handlers.load()
 end
@@ -391,7 +399,8 @@ me.exp = 100
 fr = frame(nil, 0.02)
 eq(fill_width(fr), 256, 'a level starts the bar over at once')
 
-local function kill(amount)
+-- A kill message to us. 8 is the plain EXP gain; 371 and 372 are limit points.
+local function kill(amount, msg)
     local function le(n, width)
         local s = ''
         for _ = 1, width do
@@ -400,7 +409,7 @@ local function kill(amount)
         end
         return s
     end
-    local buf = string.rep('\0', 4) .. le(7, 4) .. string.rep('\0', 8) .. le(amount, 4) .. string.rep('\0', 4) .. le(8, 2)
+    local buf = string.rep('\0', 4) .. le(7, 4) .. string.rep('\0', 8) .. le(amount, 4) .. string.rep('\0', 4) .. le(msg or 8, 2)
     handlers.packet_in({ id = 0x02D, data = buf .. string.rep('\0', 8) })
 end
 kill(200)
@@ -597,6 +606,54 @@ me.buffs = {}
 eq(#glow(frame()), 0, 'and no glow logged out, Dedication or not')
 eq(fr.windows['XPBar###xpbar_config'], true, 'the card opens logged out too')
 command('/xpb')
+
+-- Limit mode at 75: the bar is limit points out of 10000, the tab MP/hr ------------
+
+boot(19223)
+me.level, me.exp, me.limit_mode, me.limit = 75, 500, true, 2500
+fr = frame()
+eq(fill_width(fr), 640, 'in limit mode the bar is limit points: 2500 of 10000, a quarter of 2560')
+kill(300, 371)
+fr = frame()
+eq(fill_width(fr), 717, 'a limit gain moves it: 2800 of 10000')
+eq(tab_text(fr), nil, 'one limit gain is no pace yet: the tab stays hidden')
+kill(300, 372)
+fr = frame()
+-- 300 limit points over the 2 seconds since the first: 540000 an hour, 54 merits.
+eq(tab_text(fr), '54.0 MP/hr', 'a second limit gain shows MP/hr, not EXP/hr')
+eq(fill_width(fr), 794, 'a limit chain gain moves the bar too: 3100 of 10000')
+kill(200)
+fr = frame(nil, 0)
+eq(tab_text(fr), '54.0 MP/hr', 'an EXP line does not join the merit rate')
+
+me.limit_mode, me.locked = false, true
+fr = frame()
+eq(tab_text(fr) ~= nil and tab_text(fr):find('MP/hr', 1, true) ~= nil, true, 'experience locked at 75 is limit mode too')
+eq(fill_width(fr), 794, 'and keeps the limit points')
+
+me.locked = false
+fr = frame()
+eq(fill_width(fr), 1280, 'out of limit mode the bar is experience again: 500 of 1000')
+eq(tab_text(fr), nil, 'with its own rate, still 0, so the tab hides')
+
+me.level, me.limit_mode = 74, true
+fr = frame()
+eq(fill_width(fr), 1280, 'below 75 the bar stays experience, limit mode or not')
+
+-- Level Sync holds a 75 to 30, and the server still pays it limit points.
+me.level, me.sync = 75, 30
+fr = frame()
+eq(fill_width(fr), 794, 'a 75 synced to 30 in limit mode keeps the limit point bar')
+eq(tab_text(fr) ~= nil and tab_text(fr):find('MP/hr', 1, true) ~= nil, true, 'and its MP/hr')
+me.limit_mode = false
+fr = frame()
+eq(fill_width(fr), 1280, 'out of limit mode, synced, it is experience')
+me.level, me.limit_mode = 74, true
+fr = frame()
+eq(fill_width(fr), 1280, 'a 74 synced lower is experience, limit mode or not')
+me.level, me.sync, me.no_job_level = 30, 75, true
+fr = frame()
+eq(fill_width(fr), 794, 'a job level that cannot be read falls back to the main job level')
 
 -- 1.81 (Ashita 4.16): Segoe UI baked at 18, drawn at the size asked ---------------
 

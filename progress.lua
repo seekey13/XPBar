@@ -60,6 +60,8 @@ function progress.new_state()
 end
 
 -- 'exp', 'limit', or 'capacity'. The same choice progress.fraction fills from.
+-- `level` is the main job's own level, not the one Level Sync holds it to: a
+-- synced 75 in limit mode still earns limit points.
 function progress.mode(level, exp_cur, _exp_need, limit_mode, xp_locked)
     level = num(level)
     exp_cur = num(exp_cur)
